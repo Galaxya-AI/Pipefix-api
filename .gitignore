@@ -1,0 +1,19 @@
+# Private progress notes (never published)
+PROGRESS_NOTES.md
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Run outputs
+runs/
+
+# macOS
+.DS_Store
