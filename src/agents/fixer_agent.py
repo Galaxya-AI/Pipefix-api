@@ -8,6 +8,8 @@ publish anything: its changes stay in the changeset until the review.
 # Lazy annotations: lets a class name be used inside its own methods.
 from __future__ import annotations
 
+from agents.base_agent import AgentConfig
+
 # Field metadata and validators.
 from pydantic import (
     Field,
@@ -15,7 +17,6 @@ from pydantic import (
     model_validator,
 )
 
-from agents.base_agent import AgentConfig
 from agents.outputs import AgentOutput
 
 TEST_PREFIXES: tuple[str, ...] = ("tests/", "test/")

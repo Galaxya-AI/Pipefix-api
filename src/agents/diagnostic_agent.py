@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Literal
 
+from agent_base.base_agent import AgentConfig
 from pydantic import Field, field_validator
 
-from agents.base_agent import AgentConfig
 from agents.outputs import AgentOutput
 
 

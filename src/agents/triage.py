@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Literal
 
+from agents.base_agent import AgentConfig
 from pydantic import (
     Field,
     model_validator,
 )
 
-from agents.base_agent import AgentConfig
 from agents.outputs import AgentOutput
 
 Category = Literal[

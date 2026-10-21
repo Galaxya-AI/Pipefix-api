@@ -17,3 +17,8 @@ runs/
 
 # macOS
 .DS_Store
+
+# modules
+llm
+tools
+
