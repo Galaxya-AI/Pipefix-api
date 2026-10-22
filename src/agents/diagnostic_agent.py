@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from agent_base.base_agent import AgentConfig
-from pydantic import Field, field_validator
-
+from agent_base.agent_base import AgentConfig
 from agents.outputs import AgentOutput
+from pydantic import Field, field_validator
 
 
 class DiagnosisOutput(AgentOutput):
