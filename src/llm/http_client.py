@@ -11,7 +11,7 @@ from typing import Any
 
 import requests
 
-from llm.base import LLMError, LLMTransientError
+from llm.errors import LLMError, LLMTransientError
 
 # HTTP codes of temporary errors (timeout, conflict, rate limit, server overload)
 RETRY_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504, 529})

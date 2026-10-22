@@ -21,28 +21,6 @@ Message: TypeAlias = dict[str, Any]
 ToolDefinition: TypeAlias = dict[str, Any]
 
 
-class LLMError(RuntimeError):
-    """LLM call error that a new attempt will not fix (invalid key, bad request, unreadable answer)."""
-
-
-class LLMTransientError(LLMError):
-    """Temporary LLM call error that may succeed on a new attempt (network, rate limit, overload).
-
-    Parameters
-    ----------
-    message : str
-        Description of the error.
-    retry_after : float or None, default None
-        Wait advised by the API before the next attempt, in seconds, if any.
-    """
-
-    def __init__(self, message: str, retry_after: float | None = None) -> None:
-        # Normal exception message
-        super().__init__(message)
-        # Wait advised by the API (None = no advice)
-        self.retry_after: float | None = retry_after
-
-
 @dataclass(frozen=True)
 class ToolCall:
     """Tool call requested by the LLM.

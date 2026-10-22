@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from llm.base import LLMError, LLMProvider, LLMResponse, Message, ToolDefinition
+from llm.base import LLMProvider, LLMResponse, Message, ToolDefinition
+from llm.errors import LLMError
 
 
 class ProviderClient:

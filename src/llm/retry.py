@@ -10,7 +10,8 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from llm.base import LLMClient, LLMResponse, LLMTransientError, Message, ToolDefinition
+from llm.base import LLMClient, LLMResponse, Message, ToolDefinition
+from llm.errors import LLMTransientError
 
 
 class RetryingLLMClient:
