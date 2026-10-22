@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 # One conversation message, in the internal format
 Message: TypeAlias = dict[str, Any]
@@ -126,11 +126,13 @@ class LLMProvider(ABC):
     Parameters
     ----------
     name : str
-        Provider name used in .env (e.g. "openai_compatible"), set by each subclass.
+        Provider name used in .env (e.g. "openai", "mistral", "anthropic"),
+        given when the adapter is created.
     """
 
-    # Provider name, set by each subclass
-    name: ClassVar[str] = ""
+    def __init__(self, name: str) -> None:
+        # Provider name used in .env
+        self.name: str = name
 
     @abstractmethod
     def chat(
