@@ -8,7 +8,7 @@ publish anything: its changes stay in the changeset until the review.
 # Lazy annotations: lets a class name be used inside its own methods.
 from __future__ import annotations
 
-from agent_base.base_agent import AgentConfig
+from agent_base.agent_base import AgentConfig
 from agents.outputs import AgentOutput
 from pydantic import (
     Field,
