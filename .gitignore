@@ -19,6 +19,5 @@ runs/
 .DS_Store
 
 # modules
-llm
 tools
 
