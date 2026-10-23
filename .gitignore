@@ -19,6 +19,7 @@ runs/
 .DS_Store
 
 # modules
-llm
 tools
 
+#files
+README.md
