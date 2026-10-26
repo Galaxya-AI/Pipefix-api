@@ -125,6 +125,9 @@
     <p class="note">This proof of concept analyses one pipeline at a time. Give its number, or leave the field
       empty to analyse the latest failed pipeline of the project.</p>
     <form id="form">
+      <label for="access">Access code
+        <span class="help">Given to you by the owner of PipeFix.</span></label>
+      <input id="access" type="password" autocomplete="off" required>
       <label for="url">GitLab URL</label>
       <input id="url" value="https://gitlab.com" required>
       <label for="project">Project
@@ -194,7 +197,12 @@ $("form").addEventListener("submit", async (event) => {
   event.preventDefault();
   hide("form-error"); hide("result"); hide("published"); hide("publish-error");
   token = $("token").value.trim();
-  const body = { gitlab_url: $("url").value.trim(), gitlab_token: token, project: $("project").value.trim() };
+  const body = {
+    access_code: $("access").value.trim(),
+    gitlab_url: $("url").value.trim(),
+    gitlab_token: token,
+    project: $("project").value.trim(),
+  };
   const pipeline = $("pipeline").value.trim();
   if (pipeline) body.pipeline_id = Number(pipeline);
   $("start").disabled = true;

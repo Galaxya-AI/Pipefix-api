@@ -24,6 +24,7 @@ import atexit
 import hashlib
 import hmac
 import os
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, abort, jsonify, render_template, request
@@ -42,6 +43,10 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # Pipelines of these branches are ignored: they are the system's own fix branches
 FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
+
+# One "name:code" per line, given by the owner to each visitor of the web page. In OpenShift it is a mounted
+# secret: edited in the console, the file changes without a restart, so it is read again at each new run.
+ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
 
 app = Flask(__name__)
 
@@ -204,6 +209,19 @@ web_owners: dict[str, tuple[str, str]] = {}
 STAGES = ("triage", "diagnosis", "fixer", "reviewer")
 
 
+def access_owner(code: str) -> str | None:
+    """Return the name of the visitor who holds this access code, or None (no file: nobody)."""
+    try:
+        lines = Path(ACCESS_CODES_FILE).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        name, _, expected = line.strip().partition(":")
+        if name and expected and hmac.compare_digest(code.encode(), expected.encode()):
+            return name
+    return None
+
+
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -248,6 +266,9 @@ def create_web_run() -> tuple[Response, int]:
     gitlab_token = str(body.get("gitlab_token", "")).strip()
     project = str(body.get("project", "")).strip()
     pipeline_id = body.get("pipeline_id")
+    visitor = access_owner(str(body.get("access_code", "")).strip())
+    if visitor is None:
+        abort(403, description="Unknown access code. Ask the owner of PipeFix for one.")
     if not gitlab_token or not project:
         abort(400, description="The GitLab token and the project are required.")
     if not gitlab_url.startswith("https://"):
@@ -261,6 +282,8 @@ def create_web_run() -> tuple[Response, int]:
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     web_owners[run_id] = (gitlab_url, token_hash(gitlab_token))
+    # The name only, never the code.
+    RunJournal(services.store.runs_dir, run_id, verbose=False).log("web", "visitor", {"name": visitor})
     return jsonify({"run_id": run_id}), 202
 
 
