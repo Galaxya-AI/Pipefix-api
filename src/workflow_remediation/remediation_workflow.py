@@ -12,6 +12,7 @@ In dry-run mode, the patch is only written to the run folder.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterable
 from typing import Any
@@ -31,7 +32,7 @@ from workflow_analysis.remediation_round import RemediationRound
 from workflow_publication.failure_notifier import FailureNotifier
 from workflow_publication.pipeline_waiter import PipelineWaiter, outcome_status
 from workflow_publication.publication_texts import fix_branch_name
-from workflow_publication.publisher import Publisher
+from workflow_publication.publisher import SAVED_FIX_FILE, Publisher
 from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
 
@@ -136,6 +137,8 @@ class RemediationWorkflow:
                 return result.status
             if self.dry_run:
                 report["patch_file"] = str(self.journal.write_text("fix.patch", result.diff))
+                # Lets the web page publish this exact fix later, without a new analysis.
+                self.journal.write_text(SAVED_FIX_FILE, json.dumps({"pipeline": pipeline, "files": result.files}))
                 return "dry_run_patch_ready"
             commit = self.publish_fix(project, pipeline, result, report)
             if not self.wait_for_pipeline:

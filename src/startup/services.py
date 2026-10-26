@@ -19,7 +19,7 @@ from app_runs.services import ApiServices
 from app_runs.thread_launcher import ThreadLauncher
 from connectors.base.base import Connector
 from connectors.gitlab.client import GitLabClient
-from connectors.gitlab.connector import GITLAB_TOKEN, GITLAB_URL
+from connectors.gitlab.connector import GITLAB_TOKEN, GITLAB_URL, GitLabConnector
 from connectors.loader.connector_loader import load_connectors
 from journal.run_journal import RunJournal
 from llm.base import LLMClient
@@ -85,6 +85,15 @@ def build_run_function(
         return workflow.run(project, pipeline_id)
 
     return run_remediation
+
+
+def build_user_run_function(gitlab_url: str, gitlab_token: str, tools: list[Tool]) -> RunFunction:
+    """Run function of a web user: GitLab is read with the user's own token, the LLMs stay the server's."""
+    client = GitLabClient(gitlab_url, gitlab_token)
+    gitlab_tools = GitLabConnector(client).tools()
+    names = {tool.name for tool in gitlab_tools}
+    others = [tool for tool in tools if tool.name not in names]
+    return build_run_function(client, build_llm_client(), build_agents(), [*gitlab_tools, *others])
 
 
 def build_job_services() -> tuple[RunFunction, Callable[[], None]]:
