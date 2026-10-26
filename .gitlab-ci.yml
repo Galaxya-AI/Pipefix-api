@@ -1,0 +1,12 @@
+stages:
+  - check
+
+# Lint, type checks and tests on every push
+check:
+  stage: check
+  image: python:3.12-slim
+  script:
+    - pip install --no-cache-dir -r requirements.txt
+    - ruff check .
+    - mypy src app.py
+    - pytest
