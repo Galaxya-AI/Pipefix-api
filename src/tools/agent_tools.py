@@ -1,10 +1,4 @@
-"""Tool definitions specific to agents: the finish tool and the sub-agent tools.
-
-- The finish tool ("submit_<agent_name>") has the JSON schema of the agent's
-  output model: calling it ends the agent with a structured result.
-- A sub-agent tool ("call_<agent_name>") lets an agent ask another agent a
-  question (e.g. the diagnosis agent calls the research agent).
-"""
+"""Agent-specific tools: the finish tool ("submit_<agent>") and the sub-agent tools ("call_<agent>")."""
 
 from __future__ import annotations
 
@@ -13,62 +7,21 @@ from llm.base import ToolDefinition
 from tools.registry import ToolRegistry
 from tools.tool import object_schema
 
-# Prefix of the tools that call a sub-agent
-SUB_AGENT_PREFIX: str = "call_"
+SUB_AGENT_PREFIX = "call_"
 
 
 def sub_agent_tool_name(agent_name: str) -> str:
-    """Return the tool name used to call a sub-agent.
-
-    Parameters
-    ----------
-    agent_name : str
-        Name of the sub-agent.
-
-    Returns
-    -------
-    str
-        Tool name, e.g. "call_research".
-    """
-    # Prefix followed by the agent name
     return f"{SUB_AGENT_PREFIX}{agent_name}"
 
 
 def sub_agent_from_tool_name(tool_name: str) -> str | None:
-    """Return the sub-agent name behind a tool name, if it is a sub-agent tool.
-
-    Parameters
-    ----------
-    tool_name : str
-        Tool name requested by the LLM.
-
-    Returns
-    -------
-    str or None
-        Name of the sub-agent, or None for any other tool.
-    """
-    # Not a sub-agent tool
+    """Name of the sub-agent behind a tool name, or None for any other tool."""
     if not tool_name.startswith(SUB_AGENT_PREFIX):
-        # Ordinary tool
         return None
-    # Name after the prefix
     return tool_name[len(SUB_AGENT_PREFIX) :]
 
 
 def sub_agent_tool_definition(agent_name: str) -> ToolDefinition:
-    """Return the definition of the tool that calls a sub-agent.
-
-    Parameters
-    ----------
-    agent_name : str
-        Name of the sub-agent.
-
-    Returns
-    -------
-    ToolDefinition
-        Definition with a single "task" argument.
-    """
-    # Tool with one text argument: the question or task for the sub-agent
     return {
         "name": sub_agent_tool_name(agent_name),
         "description": f"Ask the {agent_name} agent to do a task. Returns its structured result as JSON.",
@@ -79,19 +32,7 @@ def sub_agent_tool_definition(agent_name: str) -> ToolDefinition:
 
 
 def finish_tool_definition(agent: AgentConfig) -> ToolDefinition:
-    """Return the definition of the finish tool of an agent.
-
-    Parameters
-    ----------
-    agent : AgentConfig
-        Agent configuration.
-
-    Returns
-    -------
-    ToolDefinition
-        Definition whose parameters are the JSON schema of the output model.
-    """
-    # Tool whose arguments are the final structured result
+    """Its parameters are the JSON schema of the agent's output model."""
     return {
         "name": agent.finish_tool_name,
         "description": "Record your final result and finish. Call it once, when your work is done.",
@@ -100,25 +41,8 @@ def finish_tool_definition(agent: AgentConfig) -> ToolDefinition:
 
 
 def agent_tool_definitions(agent: AgentConfig, registry: ToolRegistry) -> list[ToolDefinition]:
-    """Return every tool an agent can see: its tagged tools, its sub-agents and its finish tool.
-
-    Parameters
-    ----------
-    agent : AgentConfig
-        Agent configuration.
-    registry : ToolRegistry
-        All available tools.
-
-    Returns
-    -------
-    list[ToolDefinition]
-        Definitions sent to the LLM.
-    """
-    # Tools matching the agent tags
-    definitions: list[ToolDefinition] = registry.definitions(agent.tool_tags)
-    # One tool per sub-agent
+    """Every tool an agent can see: its tagged tools, its sub-agents, then its finish tool."""
+    definitions = registry.definitions(agent.tool_tags)
     definitions.extend(sub_agent_tool_definition(name) for name in agent.sub_agents)
-    # Finish tool last
     definitions.append(finish_tool_definition(agent))
-    # Complete list
     return definitions

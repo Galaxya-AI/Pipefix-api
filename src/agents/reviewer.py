@@ -1,131 +1,62 @@
 """Reviewer agent: critical check of the fix before publication.
 
-It is the automatic safeguard of the system: it reads the diagnosis and
-the diff, and decides whether the fix can be proposed as a merge request.
-A rejected fix is never published; its issues are sent back to the fixer
-for a new attempt.
+A rejected fix is never published; its issues are sent back to the fixer for a new attempt.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Literal
+
+from pydantic import Field, model_validator
 
 from agent_base.agent_base import AgentConfig
 from agents.outputs import AgentOutput
-from pydantic import (
-    Field,
-    model_validator,
-)
+from tools.tags import TAG_CODE, TAG_REVIEW
+
+REVIEWER_LLM_PROVIDER = os.getenv("REVIEWER_LLM_PROVIDER", "")
+REVIEWER_LLM_MODEL = os.getenv("REVIEWER_LLM_MODEL", "")
 
 
 class ReviewOutput(AgentOutput):
-    """Structured result of the reviewer agent.
-
-    Parameters
-    ----------
-    summary : str
-        Review opinion in one or two sentences (inherited from AgentOutput).
-    approved : bool
-        True if the fix can be proposed as a merge request.
-    issues : list[str]
-        Problems the fixer must correct (empty if approved).
-    risk : {"low", "medium", "high"}
-        Risk of the fix if it were merged.
-    comment : str
-        Review opinion written into the merge request description.
-
-    Raises
-    ------
-    pydantic.ValidationError
-        If a field is missing, has a wrong type, or breaks one of the rules below.
-    """
-
-    # Final decision: True means the fix can be published as a draft merge request.
-    approved: bool = Field(
-        ..., description="True if the fix can be proposed as a merge request."
-    )
-
-    # Problems to fix, sent back to the fixer when the fix is rejected.
-    issues: list[str] = Field(
-        default_factory=list,
-        description="Problems the fixer must correct (empty if approved).",
-    )
-
-    # Risk of the fix; a high-risk fix is never approved automatically (see validator).
+    approved: bool = Field(..., description="True if the fix can be proposed as a merge request.")
+    issues: list[str] = Field(default_factory=list, description="Problems the fixer must correct (empty if approved).")
     risk: Literal["low", "medium", "high"] = Field(..., description="Risk of the fix.")
+    # Copied into the merge request description
+    comment: str = Field(..., min_length=1, description="Review opinion for the merge request, in English.")
 
-    # Review opinion, copied into the merge request so that a human can read it.
-    comment: str = Field(
-        ...,
-        min_length=1,
-        description="Review opinion for the merge request, in English.",
-    )
-
-    # Check the whole object, after every field is validated (hence self).
     @model_validator(mode="after")
     def decision_must_be_consistent(self) -> ReviewOutput:
-        """Refuse an incoherent review decision.
-
-        Two rules:
-        - a rejection must say why (at least one issue), otherwise the fixer
-          cannot improve its next attempt;
-        - a high-risk fix cannot be approved automatically: it needs a human.
-
-        Returns
-        -------
-        ReviewOutput
-            The validated output.
-
-        Raises
-        ------
-        ValueError
-            If the fix is rejected without issues, or approved with a high risk.
-        """
-        # Rejected without any reason: the fixer would not know what to change.
+        """A rejection must list an issue (for the fixer's next attempt); a high-risk fix needs a human."""
         if not self.approved and not self.issues:
-            # Refuse the output; the message is sent back to the LLM.
             raise ValueError("A rejected fix must list at least one issue.")
-        # Approved although the risk is high: automatic approval is not allowed.
         if self.approved and self.risk == "high":
-            # Refuse the output; the message is sent back to the LLM.
-            raise ValueError(
-                "A high-risk fix cannot be approved: reject it and explain the risk in issues."
-            )
-        # Consistent decision.
+            raise ValueError("A high-risk fix cannot be approved: reject it and explain the risk in issues.")
         return self
 
 
 class ReviewerAgent(AgentConfig):
-    """Reviewer agent configuration.
+    """The LLM comes from .env (REVIEWER_LLM_PROVIDER, REVIEWER_LLM_MODEL)."""
 
-    All fields have fixed values except the LLM, which comes from .env
-    (REVIEWER_LLM_PROVIDER and REVIEWER_LLM_MODEL).
-
-    Parameters
-    ----------
-    agent_name : str, default "reviewer"
-        Identifier used in logs, reports and routing.
-    prompt_system : str
-        Role, checks and rules of the agent.
-    tool_tags : frozenset[str], default {"code", "review"}
-        Code and diff reading tools only: the reviewer cannot change anything.
-    output_model : type[AgentOutput], default ReviewOutput
-        Model that validates its final answer.
-    llm_provider : str
-        LLM provider, read from .env (required).
-    llm_model : str
-        LLM model, read from .env (required).
-
-    Examples
-    --------
-    >>> reviewer = ReviewerAgent(llm_provider="anthropic", llm_model="claude-sonnet-...")
-    >>> reviewer.finish_tool_name
-    'submit_reviewer'
-    """
-
-    # Unique name; the finish tool is "submit_reviewer".
     agent_name: str = "reviewer"
-    # Tools: read the code and view the diff. No edit tool, so the reviewer cannot change the fix.
-    tool_tags: frozenset[str] = frozenset({"code", "review"})
-    # Model that validates the final answer.
+    # Read-only: the reviewer cannot change anything
+    tool_tags: frozenset[str] = frozenset({TAG_CODE, TAG_REVIEW})
     output_model: type[AgentOutput] = ReviewOutput
+    llm_provider: str = REVIEWER_LLM_PROVIDER
+    llm_model: str = REVIEWER_LLM_MODEL
+    prompt_system: str = """You are the REVIEWER agent of a CI/CD auto-remediation system.
+You are given a diagnosis and a diff. You decide whether this diff can be proposed as a merge request.
+
+Check:
+1. Does the diff fix the root cause (and not only the symptom)?
+2. Side effects: other code calling the changed function (search_code), compatibility.
+3. Tests: no test deleted or weakened to make the pipeline pass.
+4. Scope: no unrelated change; no secret added.
+5. Syntax: is the changed code valid (indentation, parentheses, imports)? Re-read the full file if needed.
+
+Rules:
+- Approve a minimal and correct fix; reject it if there is a serious doubt,
+  explaining precisely what to change in issues.
+- Never approve a high-risk fix: a human must decide.
+- Write in English.
+ALWAYS finish by calling submit_reviewer."""

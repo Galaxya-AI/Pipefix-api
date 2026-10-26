@@ -1,108 +1,69 @@
 """Provider factory: one entry point that sends each call to the right provider adapter.
 
 Each agent declares its provider and model in .env (e.g. DIAGNOSIS_LLM_PROVIDER,
-DIAGNOSIS_LLM_MODEL). ProviderClient receives the adapters at start-up and, for
-each call, picks the adapter whose name matches the agent's provider.
-
-Adding a provider = writing its adapter (a subclass of LLMProvider) and
-passing it to ProviderClient; nothing else changes.
+DIAGNOSIS_LLM_MODEL). Adding a provider means writing its LLMProvider adapter
+and adding it in build_providers.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 
-from llm.base import LLMProvider, LLMResponse, Message, ToolDefinition
+from llm.base import LLMClient, LLMProvider, LLMResponse, Message, ToolDefinition
 from llm.errors import LLMError
+from llm.providers.openai.provider import OpenAIProvider
+from llm.retry import RetryingLLMClient
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Local OpenAI-format server (provider "ollama"), e.g. http://localhost:11434/v1
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
+LLM_TIMEOUT_S = int(os.getenv("LLM_TIMEOUT_S", "180"))
 
 
 class ProviderClient:
-    """Send each LLM call to the adapter of the requested provider.
-
-    Parameters
-    ----------
-    providers : Iterable[LLMProvider]
-        Adapters available at run time, one per provider name.
-
-    Raises
-    ------
-    ValueError
-        If two adapters have the same name, or an adapter has no name.
-
-    Examples
-    --------
-    >>> client = ProviderClient([OpenAICompatProvider(...), AnthropicProvider(...)])
-    >>> client.chat("anthropic", "claude-sonnet-...", messages, tools)
-    """
+    """Send each LLM call to the adapter registered under the requested provider name."""
 
     def __init__(self, providers: Iterable[LLMProvider]) -> None:
-        # Adapters by provider name
         self.providers: dict[str, LLMProvider] = {}
-        # Current adapter
-        provider: LLMProvider
-        # Register every adapter under its name
         for provider in providers:
-            # An adapter without a name cannot be selected
             if not provider.name:
-                # Configuration error
                 raise ValueError(f"{type(provider).__name__} has no provider name.")
-            # Two adapters with the same name would hide each other
             if provider.name in self.providers:
-                # Configuration error
                 raise ValueError(f"Two adapters are named '{provider.name}'.")
-            # Register the adapter
             self.providers[provider.name] = provider
 
     def names(self) -> list[str]:
-        """Return the names of the registered providers, sorted.
-
-        Returns
-        -------
-        list[str]
-            Provider names, used to check the .env values at start-up.
-        """
-        # Sorted names
         return sorted(self.providers)
 
-    def chat(
-        self,
-        # Registered provider name
-        provider: str,
-        # Model name for this provider
-        model: str,
-        # Conversation in the internal format
-        messages: list[Message],
-        # Tools the LLM may call
-        tools: list[ToolDefinition],
-    ) -> LLMResponse:
-        """Send the call to the adapter of the requested provider.
-
-        Parameters
-        ----------
-        provider : str
-            Registered provider name.
-        model : str
-            Model name for this provider.
-        messages : list[Message]
-            Conversation in the internal format.
-        tools : list[ToolDefinition]
-            Tools the LLM may call.
-
-        Returns
-        -------
-        LLMResponse
-            The normalised answer.
-
-        Raises
-        ------
-        LLMError
-            If no adapter is registered under this provider name.
-        """
-        # Adapter of the requested provider, if registered
-        adapter: LLMProvider | None = self.providers.get(provider)
-        # Unknown provider: final configuration error, never retried
+    def chat(self, provider: str, model: str, messages: list[Message], tools: list[ToolDefinition]) -> LLMResponse:
+        adapter = self.providers.get(provider)
+        # A configuration error: final, never retried
         if adapter is None:
-            # Error listing the valid names
             raise LLMError(f"Unknown LLM provider '{provider}'. Available: {self.names()}")
-        # Call the provider's API
         return adapter.chat(model, messages, tools)
+
+
+def build_providers(
+    openai_api_key: str = OPENAI_API_KEY,
+    ollama_base_url: str = OLLAMA_BASE_URL,
+    timeout_s: int = LLM_TIMEOUT_S,
+) -> list[LLMProvider]:
+    """Create one adapter per provider whose key (or URL) is set; the list may be empty."""
+    providers: list[LLMProvider] = []
+    if openai_api_key:
+        providers.append(OpenAIProvider("openai", openai_api_key, timeout_s=timeout_s))
+    if ollama_base_url:
+        providers.append(OpenAIProvider("ollama", "", base_url=ollama_base_url, timeout_s=timeout_s))
+    return providers
+
+
+def build_llm_client(providers: Iterable[LLMProvider] | None = None) -> LLMClient:
+    """Provider routing plus retries; None uses the providers configured in .env.
+
+    Raise LLMError if no provider is configured.
+    """
+    adapters = list(providers) if providers is not None else build_providers()
+    if not adapters:
+        raise LLMError("No LLM provider configured: set OPENAI_API_KEY or OLLAMA_BASE_URL.")
+    return RetryingLLMClient(ProviderClient(adapters))
