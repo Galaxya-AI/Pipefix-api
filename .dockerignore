@@ -1,0 +1,12 @@
+.env
+.git
+.venv
+runs
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+PROGRESS_NOTES.md
+tests
+*.rdb
+appendonly*
