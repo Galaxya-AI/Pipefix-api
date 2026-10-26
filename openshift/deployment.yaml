@@ -32,6 +32,9 @@ spec:
           volumeMounts:
             - name: runs
               mountPath: /app/runs
+            - name: access-codes
+              mountPath: /etc/pipefix
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
@@ -50,3 +53,7 @@ spec:
       volumes:
         - name: runs
           emptyDir: {}
+        - name: access-codes
+          secret:
+            secretName: pipefix-access
+            optional: true
