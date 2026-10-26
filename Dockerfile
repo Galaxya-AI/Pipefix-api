@@ -14,7 +14,7 @@ COPY templates/ templates/
 COPY src/ src/
 COPY config/ config/
 
-RUN useradd --create-home appuser && mkdir -p /app/runs && chown appuser /app/runs
+RUN useradd --create-home appuser && mkdir -p /app/runs && chown appuser:0 /app/runs && chmod g+rwX /app/runs
 USER appuser
 
 EXPOSE 8000

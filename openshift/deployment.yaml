@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipefix
+  labels:
+    app: pipefix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipefix
+  template:
+    metadata:
+      labels:
+        app: pipefix
+    spec:
+      imagePullSecrets:
+        - name: gitlab-registry-pipefix
+      containers:
+        - name: app
+          image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: pipefix-env
+          env:
+            - name: APP_VERSION
+              value: "VERSION_PLACEHOLDER"
+            - name: RUNS_DIR
+              value: /app/runs
+          volumeMounts:
+            - name: runs
+              mountPath: /app/runs
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: runs
+          emptyDir: {}

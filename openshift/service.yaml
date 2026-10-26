@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipefix
+  labels:
+    app: pipefix
+spec:
+  selector:
+    app: pipefix
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
