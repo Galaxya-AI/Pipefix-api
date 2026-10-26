@@ -3,6 +3,8 @@ PROGRESS_NOTES.md
 
 # Secrets
 .env
+openshift/setup.env
+openshift/access-codes
 
 # Python
 __pycache__/
