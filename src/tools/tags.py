@@ -1,69 +1,30 @@
 """Tool tags: they decide which agents receive which tools.
 
-A connector tags its tools; each agent lists the tags it needs in its
-configuration (tool_tags) and automatically receives the matching tools.
-Only the tags of KNOWN_TAGS are accepted: a new tag must be added here first.
+A connector tags its tools; an agent lists the tags it needs (tool_tags) and receives the matching tools.
+A new tag must be added to KNOWN_TAGS first.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-# Pipelines, jobs and their logs
-TAG_CI: str = "ci"
-
-# Reading the source code of the repository
-TAG_CODE: str = "code"
-
-# Metrics, alerts and dashboards
-TAG_OBSERVABILITY: str = "observability"
-
+TAG_CI = "ci"
+TAG_CODE = "code"
+TAG_OBSERVABILITY = "observability"
 # Any other information useful for the diagnosis (quality, dependencies, cluster...)
-TAG_CONTEXT: str = "context"
+TAG_CONTEXT = "context"
+# Reserved for the fixer
+TAG_EDIT = "edit"
+TAG_REVIEW = "review"
+TAG_RESEARCH = "research"
 
-# Proposing changes (reserved for the fixer)
-TAG_EDIT: str = "edit"
-
-# Viewing the proposed changes
-TAG_REVIEW: str = "review"
-
-# Searching the web for unknown errors (research agent)
-TAG_RESEARCH: str = "research"
-
-# Every known tag
-KNOWN_TAGS: frozenset[str] = frozenset(
-    {TAG_CI, TAG_CODE, TAG_OBSERVABILITY, TAG_CONTEXT, TAG_EDIT, TAG_REVIEW, TAG_RESEARCH}
-)
+KNOWN_TAGS = frozenset({TAG_CI, TAG_CODE, TAG_OBSERVABILITY, TAG_CONTEXT, TAG_EDIT, TAG_REVIEW, TAG_RESEARCH})
 
 
 def check_tags(tags: Iterable[str]) -> frozenset[str]:
-    """Check that every tag is a known tag.
-
-    A typo in a tag (e.g. "obserability") would silently give an agent no
-    tools: this check turns it into a clear error at start-up.
-
-    Parameters
-    ----------
-    tags : Iterable[str]
-        Tags of a tool or of an agent.
-
-    Returns
-    -------
-    frozenset[str]
-        The same tags.
-
-    Raises
-    ------
-    ValueError
-        If a tag is not in KNOWN_TAGS.
-    """
-    # Tags as a set
-    checked: frozenset[str] = frozenset(tags)
-    # Tags missing from the known list
-    unknown: list[str] = sorted(checked - KNOWN_TAGS)
-    # At least one unknown tag
+    """Raise ValueError on an unknown tag: a typo would otherwise silently give an agent no tools."""
+    checked = frozenset(tags)
+    unknown = sorted(checked - KNOWN_TAGS)
     if unknown:
-        # Clear error with the valid tags
         raise ValueError(f"Unknown tool tags {unknown}. Known tags: {sorted(KNOWN_TAGS)}.")
-    # Valid tags
     return checked

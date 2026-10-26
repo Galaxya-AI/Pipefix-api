@@ -1,9 +1,10 @@
 """Exceptions raised while running agents."""
 
+from __future__ import annotations
+
 
 class AgentRunError(RuntimeError):
-    """Raised when an agent cannot produce a valid output within its limits.
+    """The agent could not produce a valid output within its limits.
 
-    Typical causes: the LLM provider keeps failing after its retries, the agent
-    reaches its turn limit, or it gives too many invalid final answers.
+    E.g. the LLM provider keeps failing, the turn limit is reached, or too many final answers are invalid.
     """
