@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PipeFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f2f4f7; --surface: #ffffff; --ink: #172131; --muted: #5b6577; --line: #d9dee6;
+    --brand: #0b6e79; --brand-ink: #ffffff; --pass: #1d8348; --fail: #c73e3a; --run: #b7791f;
+    --add: #e3f3e8; --del: #fbe7e6; --code: #f7f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #11161e; --surface: #182029; --ink: #e5e9f0; --muted: #96a1b3; --line: #2a3441;
+      --brand: #3fb6c2; --brand-ink: #071a1d; --pass: #4cc47a; --fail: #f07470; --run: #e2a93b;
+      --add: #173323; --del: #3b1d1e; --code: #141a22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font: 15px/1.55 "IBM Plex Sans", system-ui, sans-serif; }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  header { border-bottom: 1px solid var(--line); background: var(--surface); }
+  .bar { max-width: 1120px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
+  .wordmark { font-weight: 600; font-size: 18px; letter-spacing: -.01em; }
+  .bar p { margin: 0 0 0 auto; color: var(--muted); font-size: 14px; }
+
+  main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 64px;
+         display: grid; grid-template-columns: 330px 1fr; gap: 28px; align-items: start; }
+  h1 { font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 600; }
+  h2 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+  .lede { color: var(--muted); margin: 0 0 12px; }
+  .note { margin: 0 0 8px; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--surface);
+          font-size: 14px; border-radius: 0 6px 6px 0; }
+
+  form label { display: block; font-weight: 500; font-size: 14px; margin: 16px 0 6px; }
+  .help { display: block; color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 2px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
+          background: var(--surface); color: var(--ink); font: inherit; }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  button { font: inherit; font-weight: 500; border-radius: 6px; padding: 10px 16px; cursor: pointer; }
+  .primary { background: var(--brand); color: var(--brand-ink); border: 1px solid var(--brand); }
+  .quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  form .primary { width: 100%; margin-top: 22px; }
+  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; }
+
+  .run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .run-head { padding: 20px 24px 18px; border-bottom: 1px solid var(--line); }
+  .run-head .mono { color: var(--muted); font-size: 13px; }
+
+  /* The agents drawn like the stages of a GitLab pipeline graph */
+  .track { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .track li { position: relative; text-align: center; font-size: 13px; color: var(--muted); }
+  .track li::before { content: ""; position: absolute; top: 15px; left: -50%; width: 100%; height: 2px; background: var(--line); }
+  .track li:first-child::before { display: none; }
+  .track li.done::before { background: var(--pass); }
+  .track li.running::before, .track li.stopped::before { background: var(--muted); }
+  .node { position: relative; z-index: 1; width: 32px; height: 32px; margin: 0 auto 6px; border-radius: 50%;
+          display: grid; place-items: center; background: var(--surface); border: 2px solid var(--line); }
+  .node svg { width: 16px; height: 16px; }
+  .done .node { border-color: var(--pass); color: var(--pass); }
+  .running .node { border-color: var(--run); color: var(--run); }
+  .running .node::after { content: ""; position: absolute; inset: -6px; border-radius: 50%;
+                          border: 2px solid transparent; border-top-color: var(--run); animation: spin 1s linear infinite; }
+  .stopped .node { border-color: var(--fail); color: var(--fail); }
+  .done, .running, .stopped { color: var(--ink); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .running .node::after { animation: none; } }
+
+  .calls { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+  .calls li { padding: 2px 0; }
+
+  .body { padding: 22px 24px 24px; }
+  .empty { color: var(--muted); margin: 0; }
+  .verdict { display: flex; gap: 10px; align-items: baseline; margin: 0 0 16px; font-weight: 600; font-size: 17px; }
+  .verdict .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+  .ok .dot { background: var(--pass); } .warn .dot { background: var(--run); } .bad .dot { background: var(--fail); }
+  dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px 16px; margin: 0 0 20px; }
+  dt { color: var(--muted); } dd { margin: 0; }
+
+  .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .file-name { padding: 8px 12px; background: var(--code); border-bottom: 1px solid var(--line); font-size: 13px; }
+  pre.diff { margin: 0; padding: 8px 0; overflow-x: auto; font-size: 13px; line-height: 1.6; background: var(--surface); }
+  pre.diff span { display: block; padding: 0 12px; white-space: pre; }
+  .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+  .actions p { margin: 0; font-size: 13px; color: var(--muted); }
+  .published { margin-top: 14px; font-size: 14px; }
+  .published a { color: var(--brand); font-weight: 500; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; padding: 24px 16px 48px; }
+    .bar { padding: 12px 16px; } .bar p { display: none; }
+    .run-head, .body { padding-left: 16px; padding-right: 16px; }
+    dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 8px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <svg width="26" height="14" viewBox="0 0 26 14" aria-hidden="true">
+      <line x1="4" y1="7" x2="22" y2="7" stroke="currentColor" stroke-width="2" opacity=".35"/>
+      <circle cx="4" cy="7" r="3.5" fill="var(--muted)"/><circle cx="13" cy="7" r="3.5" fill="var(--muted)"/>
+      <circle cx="22" cy="7" r="3.5" fill="var(--pass)"/>
+    </svg>
+    <span class="wordmark">PipeFix</span>
+    <p>Diagnoses failed GitLab pipelines and proposes reviewed fixes</p>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h1>Why did the pipeline fail?</h1>
+    <p class="lede">PipeFix reads a failed GitLab pipeline, finds the cause and proposes a fix reviewed by a
+      second agent. Nothing changes in your project until you choose to create the merge request.</p>
+    <p class="note">This proof of concept analyses one pipeline at a time. Give its number, or leave the field
+      empty to analyse the latest failed pipeline of the project.</p>
+    <form id="form">
+      <label for="url">GitLab URL</label>
+      <input id="url" value="https://gitlab.com" required>
+      <label for="project">Project
+        <span class="help">Path as in the project URL, for example group/my-project</span></label>
+      <input id="project" required>
+      <label for="token">Access token
+        <span class="help">read_api is enough to analyse. Creating the merge request needs the api scope. Used for this run only, never stored.</span></label>
+      <input id="token" type="password" autocomplete="off" required>
+      <label for="pipeline">Pipeline number
+        <span class="help">Shown in GitLab under Build, Pipelines. Empty: the latest failed pipeline.</span></label>
+      <input id="pipeline" inputmode="numeric" placeholder="e.g. 2978771">
+      <button class="primary" id="start" type="submit">Analyse the pipeline</button>
+      <p class="error" id="form-error" role="alert" hidden></p>
+    </form>
+  </section>
+
+  <section class="run" aria-live="polite">
+    <div class="run-head">
+      <h2 id="run-title">No analysis yet</h2>
+      <span class="mono" id="run-id"></span>
+      <ol class="track" id="track"></ol>
+      <ul class="calls" id="calls"></ul>
+    </div>
+    <div class="body">
+      <p class="empty" id="empty">Four agents look at the failure in turn: triage sorts it, diagnosis finds the cause,
+        the fixer writes the change and the reviewer checks it before you see it.</p>
+      <div id="result" hidden>
+        <p class="verdict" id="verdict"><span class="dot"></span><span id="verdict-text"></span></p>
+        <dl id="details"></dl>
+        <div id="changes" hidden>
+          <div class="file"><div class="file-name mono" id="file-name"></div><pre class="diff" id="diff"></pre></div>
+          <div class="actions">
+            <button class="primary" id="publish" type="button">Create merge request</button>
+            <button class="quiet" id="download" type="button">Download patch</button>
+            <p>The merge request is a draft: you review it before merging.</p>
+          </div>
+          <p class="error" id="publish-error" role="alert" hidden></p>
+          <p class="published" id="published" hidden>Merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STAGE_LABELS = { triage: "Triage", diagnosis: "Diagnosis", fixer: "Fix", reviewer: "Review" };
+const ICONS = {
+  done: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  stopped: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  running: "", pending: "",
+};
+const VERDICTS = {
+  dry_run_patch_ready: ["A fix is ready", "ok"],
+  not_fixable_by_code: ["Not caused by the code: check the environment or the CI configuration", "warn"],
+  infra_flaky: ["Looks temporary: retry the pipeline", "warn"],
+  review_rejected: ["The reviewer rejected the proposed fix", "warn"],
+  no_failed_pipeline: ["No failed pipeline found in this project", "warn"],
+  blocked_by_policy: ["This project is excluded by the data policy", "bad"],
+  error: ["The analysis stopped with an error", "bad"],
+};
+let token = "", runId = "", patch = "";
+
+drawTrack(Object.keys(STAGE_LABELS).map((name) => ({ name, state: "pending" })));
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  hide("form-error"); hide("result"); hide("published"); hide("publish-error");
+  token = $("token").value.trim();
+  const body = { gitlab_url: $("url").value.trim(), gitlab_token: token, project: $("project").value.trim() };
+  const pipeline = $("pipeline").value.trim();
+  if (pipeline) body.pipeline_id = Number(pipeline);
+  $("start").disabled = true;
+  try {
+    const answer = await send("/web/runs", body);
+    runId = answer.run_id;
+    $("run-title").textContent = `Analysing ${body.project}`;
+    $("run-id").textContent = `Run ${runId}`;
+    show("empty", "The agents are working on it. An analysis usually takes one to three minutes.");
+    poll();
+  } catch (error) {
+    show("form-error", error.message);
+    $("start").disabled = false;
+  }
+});
+
+async function poll() {
+  const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Gitlab-Token": token } });
+  if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
+  const data = await response.json();
+  drawTrack(data.stages);
+  $("calls").replaceChildren(...data.calls.map((call) => tag("li", `${call.agent} called ${call.tool}`)));
+  const status = data.run ? data.run.status : "running";
+  if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
+  $("calls").replaceChildren();
+  hide("empty");
+  $("run-title").textContent = `Analysis of ${data.run.project || $("project").value}`;
+  showResult(data.run, data.patch, data.merge_request);
+  $("start").disabled = false;
+}
+
+function drawTrack(stages) {
+  $("track").replaceChildren(...stages.map((stage) => {
+    const li = tag("li", "");
+    li.className = stage.state;
+    const node = tag("span", "");
+    node.className = "node";
+    node.innerHTML = ICONS[stage.state];
+    li.append(node, STAGE_LABELS[stage.name]);
+    return li;
+  }));
+}
+
+function showResult(report, diff, mergeRequest) {
+  const [text, level] = VERDICTS[report.status] || [`Finished: ${report.status}`, "warn"];
+  $("verdict").className = `verdict ${level}`;
+  $("verdict-text").textContent = text;
+  const round = (report.rounds || []).at(-1) || {};
+  const rows = [
+    ["Cause", round.diagnosis && round.diagnosis.root_cause],
+    ["Fix", round.fix && round.fix.summary],
+    ["Review", round.review && round.review.comment],
+    ["Error", report.error || round.error],
+  ].filter(([, value]) => value);
+  $("details").replaceChildren(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
+  patch = diff || "";
+  $("changes").hidden = !patch;
+  if (patch) {
+    const files = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
+    $("file-name").textContent = files.join(", ");
+    $("diff").replaceChildren(...patch.trimEnd().split("\n").filter((line) => !/^(---|\+\+\+) /.test(line)).map(diffLine));
+  }
+  $("publish").disabled = false;
+  if (mergeRequest) showPublished(mergeRequest);
+  show("result");
+}
+
+function diffLine(line) {
+  const span = tag("span", line || " ");
+  if (line.startsWith("@@")) span.className = "hunk";
+  else if (line.startsWith("+")) span.className = "add";
+  else if (line.startsWith("-")) span.className = "del";
+  return span;
+}
+
+$("publish").addEventListener("click", async () => {
+  $("publish").disabled = true;
+  hide("publish-error");
+  try {
+    const answer = await send(`/web/runs/${runId}/publish`, null, { "X-Gitlab-Token": token });
+    showPublished(answer.merge_request);
+  } catch (error) {
+    show("publish-error", error.message);
+    $("publish").disabled = false;
+  }
+});
+
+function showPublished(url) {
+  $("mr-link").href = url;
+  $("mr-link").textContent = url;
+  $("publish").disabled = true;
+  show("published");
+}
+
+$("download").addEventListener("click", () => {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([patch], { type: "text/x-diff" }));
+  link.download = "fix.patch";
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+
+async function send(url, body, headers = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const answer = await response.json();
+  if (!response.ok) throw new Error(answer.message || "The request failed.");
+  return answer;
+}
+function tag(name, text) { const node = document.createElement(name); node.textContent = text; return node; }
+function show(id, text) { if (text !== undefined) $(id).textContent = text; $(id).hidden = false; }
+function hide(id) { $(id).hidden = true; }
+</script>
+</body>
+</html>
