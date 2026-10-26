@@ -1,0 +1,67 @@
+# Production stack: REST API (gunicorn) + queue workers + Redis
+#   docker compose up --build -d
+#   docker compose up -d --scale worker=3     (3 runs in parallel)
+services:
+  api:
+    build: .
+    image: ci-remediation:0.2.0
+    # Variables of the project (never copied into the image)
+    env_file: .env
+    # Production server. Several workers are safe because the state is in Redis.
+    # Requests are short: the runs go on in the queue workers.
+    command: ["gunicorn", "app:app", "--bind=0.0.0.0:8000", "--workers=${GUNICORN_WORKERS:-2}", "--threads=${GUNICORN_THREADS:-4}", "--timeout=${GUNICORN_TIMEOUT:-60}", "--graceful-timeout=30", "--access-logfile=-", "--error-logfile=-"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      RUNS_DIR: /app/runs
+    ports:
+      - "8000:8000"
+    volumes:
+      # Run folders shared with the workers, kept on the host
+      - ./runs:/app/runs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    # Same image as the API (built by the api service)
+    image: ci-remediation:0.2.0
+    pull_policy: never
+    # Processes the queued runs: "high" (important branches) is always emptied before "default".
+    # --with-scheduler runs the jobs planned for later (enqueue_at, enqueue_in).
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "--with-scheduler", "high", "default"]
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      RUNS_DIR: /app/runs
+    volumes:
+      - ./runs:/app/runs
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+    # Time given to finish the current run before the worker is stopped
+    stop_grace_period: 30m
+
+  redis:
+    image: redis:7-alpine
+    # Append-only file: queued runs, statuses and locks survive a restart
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
