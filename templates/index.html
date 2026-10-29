@@ -50,7 +50,7 @@
   .quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
   button:disabled { opacity: .55; cursor: default; }
   form .primary { width: 100%; margin-top: 22px; }
-  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; }
+  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
   .run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .run-head { padding: 20px 24px 18px; border-bottom: 1px solid var(--line); }
@@ -83,8 +83,9 @@
   .verdict { display: flex; gap: 10px; align-items: baseline; margin: 0 0 16px; font-weight: 600; font-size: 17px; }
   .verdict .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; transform: translateY(-1px); }
   .ok .dot { background: var(--pass); } .warn .dot { background: var(--run); } .bad .dot { background: var(--fail); }
-  dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px 16px; margin: 0 0 20px; }
-  dt { color: var(--muted); } dd { margin: 0; }
+  dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; margin: 0 0 20px; }
+  /* Long errors (an API answer, a URL, a key mask) wrap inside the frame instead of being cut. */
+  dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
   .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .file-name { padding: 8px 12px; background: var(--code); border-bottom: 1px solid var(--line); font-size: 13px; }

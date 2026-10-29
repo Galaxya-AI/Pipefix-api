@@ -17,11 +17,20 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT") or "development"
 
 # Never sent to Sentry: the visitors' GitLab tokens and access codes.
-PRIVATE_FIELDS = ["x-gitlab-token", "x_gitlab_token", "gitlab_token", "access_code", "api_token"]
+PRIVATE_FIELDS = [
+    "x-gitlab-token",
+    "x_gitlab_token",
+    "gitlab_token",
+    "x-run-key",
+    "x_run_key",
+    "run_key",
+    "access_code",
+    "api_token",
+]
 
 logging.basicConfig(
     level=LOG_LEVEL.upper(),
-    format="%(asctime)s %(levelname)s %(module)s:%(lineno)d %(message)s",
+    format="%(asctime)s %(levelname)s %(module)s.%(funcName)s:%(lineno)d %(message)s",
     stream=sys.stdout,
 )
 logger = logging.getLogger("pipefix")
