@@ -329,25 +329,35 @@ def create_web_run() -> tuple[Response, int]:
 
 @app.get("/web/runs/<run_id>")
 def get_web_run(run_id: str) -> Response:
-    """Status (then report), state of each agent, last tool calls and patch of a web run."""
+    """Status (then the shown part of the report), state of each agent and patch of a web run."""
     web_owner(run_id)
     run = services.store.get_run(run_id)
     finished = run is not None and run.get("status") not in ("queued", "running")
     events = services.store.events(run_id) or []
-    calls = [
-        {"agent": event.get("actor"), "tool": (event.get("data") or {}).get("tool")}
-        for event in events
-        if event.get("event") == "tool_call"
-    ]
     return jsonify(
         {
-            "run": run,
+            "run": public_run(run),
             "stages": stage_states(events, finished),
-            "calls": calls[-6:],
             "patch": services.store.patch(run_id),
             "merge_request": published_merge_request(run_id),
         }
     )
+
+
+def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
+    if run is None:
+        return None
+    last = (run.get("rounds") or [{}])[-1] or {}
+    shown = {
+        "diagnosis": {"root_cause": (last.get("diagnosis") or {}).get("root_cause")},
+        "fix": {"summary": (last.get("fix") or {}).get("summary")},
+        "review": {"comment": (last.get("review") or {}).get("comment")},
+        "error": last.get("error"),
+    }
+    view = {key: run.get(key) for key in ("status", "project", "error", "merge_request_url") if run.get(key)}
+    view["rounds"] = [shown] if run.get("rounds") else []
+    return view
 
 
 def published_merge_request(run_id: str) -> str | None:

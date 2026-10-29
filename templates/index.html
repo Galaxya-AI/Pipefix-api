@@ -75,8 +75,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .running .node::after { animation: none; } }
 
-  .calls { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
-  .calls li { padding: 2px 0; }
 
   .body { padding: 22px 24px 24px; }
   .empty { color: var(--muted); margin: 0; }
@@ -152,7 +150,6 @@
       <h2 id="run-title">No analysis yet</h2>
       <span class="mono" id="run-id"></span>
       <ol class="track" id="track"></ol>
-      <ul class="calls" id="calls"></ul>
     </div>
     <div class="body">
       <p class="empty" id="empty">Four agents look at the failure in turn: triage sorts it, diagnosis finds the cause,
@@ -232,10 +229,8 @@ async function poll() {
   if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
   const data = await response.json();
   drawTrack(data.stages);
-  $("calls").replaceChildren(...data.calls.map((call) => tag("li", `${call.agent} called ${call.tool}`)));
   const status = data.run ? data.run.status : "running";
   if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
-  $("calls").replaceChildren();
   hide("empty");
   $("run-title").textContent = `Analysis of ${data.run.project || ""}`;
   showResult(data.run, data.patch, data.merge_request);
