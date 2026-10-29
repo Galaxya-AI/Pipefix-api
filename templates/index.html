@@ -160,6 +160,8 @@
       <div id="result" hidden>
         <p class="verdict" id="verdict"><span class="dot"></span><span id="verdict-text"></span></p>
         <dl id="details"></dl>
+        <p class="published" id="existing" hidden>Merge or close it before asking for a new fix:
+          <a id="existing-link" target="_blank" rel="noopener"></a></p>
         <div id="changes" hidden>
           <div class="file"><div class="file-name mono" id="file-name"></div><pre class="diff" id="diff"></pre></div>
           <div class="actions">
@@ -190,6 +192,7 @@ const ICONS = {
 };
 const VERDICTS = {
   dry_run_patch_ready: ["A fix is ready", "ok"],
+  fix_already_proposed: ["A fix for this pipeline is already waiting in a merge request", "ok"],
   not_fixable_by_code: ["Not caused by the code: check the environment or the CI configuration", "warn"],
   infra_flaky: ["Looks temporary: retry the pipeline", "warn"],
   review_rejected: ["The reviewer rejected the proposed fix", "warn"],
@@ -265,6 +268,11 @@ function showResult(report, diff, mergeRequest) {
     ["Review", round.review && round.review.comment],
     ["Error", report.error || round.error],
   ].filter(([, value]) => value);
+  $("existing").hidden = !report.merge_request_url;
+  if (report.merge_request_url) {
+    $("existing-link").href = report.merge_request_url;
+    $("existing-link").textContent = report.merge_request_url;
+  }
   $("details").replaceChildren(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
   patch = diff || "";
   $("changes").hidden = !patch;
