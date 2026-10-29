@@ -87,8 +87,15 @@
   /* Long errors (an API answer, a URL, a key mask) wrap inside the frame instead of being cut. */
   dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
+  /* One frame per changed file, like the Changes tab of a GitLab merge request; a click on the name folds it. */
+  .files-summary { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
   .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .file-name { padding: 8px 12px; background: var(--code); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .file + .file { margin-top: 10px; }
+  .file-name { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; background: var(--code);
+               font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+  .file[open] .file-name { border-bottom: 1px solid var(--line); }
+  .file-name .path { flex: 1; min-width: 0; }
+  .file-name .count-add { color: var(--pass); } .file-name .count-del { color: var(--fail); }
   pre.diff { margin: 0; padding: 8px 0; overflow-x: auto; font-size: 13px; line-height: 1.6; background: var(--surface); }
   pre.diff span { display: block; padding: 0 12px; white-space: pre; }
   .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
@@ -162,7 +169,8 @@
         <p class="verdict" id="verdict"><span class="dot"></span><span id="verdict-text"></span></p>
         <dl id="details"></dl>
         <div id="changes" hidden>
-          <div class="file"><div class="file-name mono" id="file-name"></div><pre class="diff" id="diff"></pre></div>
+          <p class="files-summary" id="files-summary"></p>
+          <div id="files"></div>
           <div class="actions">
             <button class="primary" id="publish" type="button">Create merge request</button>
             <button class="quiet" id="download" type="button">Download patch</button>
@@ -270,13 +278,56 @@ function showResult(report, diff, mergeRequest) {
   patch = diff || "";
   $("changes").hidden = !patch;
   if (patch) {
-    const files = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
-    $("file-name").textContent = files.join(", ");
-    $("diff").replaceChildren(...patch.trimEnd().split("\n").filter((line) => !/^(---|\+\+\+) /.test(line)).map(diffLine));
+    const files = splitPatch(patch);
+    $("files-summary").textContent = files.length === 1 ? "1 file changed" : `${files.length} files changed`;
+    $("files").replaceChildren(...files.map(fileBlock));
   }
   $("publish").disabled = false;
   if (mergeRequest) showPublished(mergeRequest);
   show("result");
+}
+
+// Split a unified patch into one entry per file: { path, lines }, without the file header lines.
+// A file starts at a "--- " line directly followed by "+++ ": a removed line that starts with "--" stays code.
+function splitPatch(text) {
+  const lines = text.trimEnd().split("\n");
+  const files = [];
+  let current = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.startsWith("--- ") && (lines[index + 1] || "").startsWith("+++ ")) {
+      current = { path: lines[index + 1].slice(4).replace(/^b\//, ""), lines: [] };
+      files.push(current);
+      index += 1;
+      continue;
+    }
+    if (/^(diff --git |index |new file mode|deleted file mode)/.test(line)) continue;
+    if (!current) { current = { path: "", lines: [] }; files.push(current); }
+    current.lines.push(line);
+  }
+  return files.filter((file) => file.lines.length);
+}
+
+function fileBlock(file) {
+  const block = document.createElement("details");
+  block.className = "file";
+  block.open = true;
+  const added = file.lines.filter((line) => line.startsWith("+")).length;
+  const removed = file.lines.filter((line) => line.startsWith("-")).length;
+  const name = document.createElement("summary");
+  name.className = "file-name mono";
+  const path = tag("span", file.path || "(file)");
+  path.className = "path";
+  const plus = tag("span", `+${added}`);
+  plus.className = "count-add";
+  const minus = tag("span", `\u2212${removed}`);
+  minus.className = "count-del";
+  name.append(path, plus, minus);
+  const code = document.createElement("pre");
+  code.className = "diff";
+  code.replaceChildren(...file.lines.map(diffLine));
+  block.append(name, code);
+  return block;
 }
 
 function diffLine(line) {
