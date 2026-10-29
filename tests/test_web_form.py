@@ -169,3 +169,46 @@ def test_web_run_shows_no_internal_detail(
     assert "add subtracts" in body
     for internal in ("search_code", "tool_call", "evidence", "fix_plan", "llm_calls", "per_agent", "confidential"):
         assert internal not in body
+
+
+def start_with_number(client: FlaskClient, monkeypatch: pytest.MonkeyPatch, number: Any, pipeline: Any) -> Any:
+    app_module = sys.modules["app"]
+    monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
+    monkeypatch.setattr(app_module.GitLabClient, "get_pipeline", pipeline)
+    return client.post(
+        "/web/runs",
+        json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "pipeline_id": number},
+    )
+
+
+@pytest.mark.parametrize("number", ["abc", "12a", "-3", "0"])
+def test_wrong_pipeline_number_is_refused_never_replaced(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch, number: str
+) -> None:
+    response = start_with_number(client, monkeypatch, number, lambda self, project, pipeline_id: {"status": "failed"})
+    assert response.status_code == 400
+    assert "pipeline number" in response.get_json()["message"]
+
+
+def test_successful_pipeline_is_answered_at_once(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    response = start_with_number(
+        client, monkeypatch, "#3005959635", lambda self, project, pipeline_id: {"status": "success"}
+    )
+    assert response.status_code == 400
+    assert "#3005959635 passed" in response.get_json()["message"]
+
+
+def test_unknown_pipeline_is_named(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing(self: Any, project: str, pipeline_id: int) -> Any:
+        raise ConnectorError("404 Not found", 404)
+
+    response = start_with_number(client, monkeypatch, "42", missing)
+    assert response.status_code == 400
+    assert "#42 does not exist in the project g/app" in response.get_json()["message"]
+
+
+def test_agent_failure_reason_stays_out_of_the_page(client: FlaskClient) -> None:
+    view = sys.modules["app"].public_run(
+        {"status": "diagnosis_failed", "rounds": [{"error": "Agent 'diagnosis' reached its turn limit (10)."}]}
+    )
+    assert "turn limit" not in str(view)

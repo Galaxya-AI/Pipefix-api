@@ -305,11 +305,10 @@ def create_web_run() -> tuple[Response, int]:
         gitlab_url, project, pipeline_in_url = parse_project_url(address)
     except ValueError as error:
         abort(400, description=str(error))
-    pipeline_id = body.get("pipeline_id") or pipeline_in_url
-    if pipeline_id is not None and (not isinstance(pipeline_id, int) or pipeline_id < 1):
-        abort(400, description="The pipeline number must be a positive number.")
+    pipeline_id = read_pipeline_number(body.get("pipeline_id")) or pipeline_in_url
+    gitlab = GitLabClient(gitlab_url, gitlab_token)
     try:
-        GitLabClient(gitlab_url, gitlab_token).get_project(project)
+        gitlab.get_project(project)
     except ConnectorError as error:
         if gitlab_token:
             abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
@@ -318,6 +317,8 @@ def create_web_run() -> tuple[Response, int]:
             description="This project cannot be read without a token: it is private or does not exist. "
             "Add an access token with the read_api scope.",
         )
+    if pipeline_id is not None:
+        check_pipeline_to_fix(gitlab, project, pipeline_id)
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     run_key = secrets.token_urlsafe(32)
@@ -344,6 +345,36 @@ def get_web_run(run_id: str) -> Response:
     )
 
 
+def read_pipeline_number(value: Any) -> int | None:
+    """Return the pipeline number typed in the form ("3005959635" or "#3005959635"), None when empty.
+
+    Anything else is refused: a number typed wrongly must never fall back to the latest failed pipeline.
+    """
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lstrip("#").strip()
+    if not text.isdigit() or int(text) < 1:
+        abort(400, description="The pipeline number must be a number, for example 2978771 or #2978771.")
+    return int(text)
+
+
+def check_pipeline_to_fix(gitlab: GitLabClient, project: str, pipeline_id: int) -> None:
+    """Answer at once, before any agent runs, when the pipeline is missing or has nothing to fix."""
+    try:
+        pipeline = gitlab.get_pipeline(project, pipeline_id)
+    except ConnectorError as error:
+        if error.status_code == 404:
+            abort(400, description=f"Pipeline #{pipeline_id} does not exist in the project {project}.")
+        raise
+    status = str(pipeline.get("status", ""))
+    if status == "success":
+        abort(400, description=f"Pipeline #{pipeline_id} passed: there is nothing to fix.")
+    if status in ("created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"):
+        abort(400, description=f"Pipeline #{pipeline_id} is still running: try again once it has failed.")
+    if status != "failed":
+        abort(400, description=f"Pipeline #{pipeline_id} did not fail (status: {status}): there is nothing to fix.")
+
+
 def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
     """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
     if run is None:
@@ -356,7 +387,8 @@ def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
         },
         "fix": {"summary": (last.get("fix") or {}).get("summary")},
         "review": {"comment": (last.get("review") or {}).get("comment")},
-        "error": last.get("error"),
+        # An agent that could not finish: the reason is for the developers' logs, not for the visitor.
+        "error": None if str(run.get("status", "")).endswith("_failed") else last.get("error"),
     }
     view = {key: run.get(key) for key in ("status", "project", "error", "merge_request_url") if run.get(key)}
     view["rounds"] = [shown] if run.get("rounds") else []
