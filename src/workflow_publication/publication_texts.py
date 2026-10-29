@@ -55,13 +55,7 @@ def merge_request_description(pipeline: dict[str, Any], result: RoundResult, bas
             f"**Automatic review**: risk {text_field(result.review, 'risk', '?')} - "
             f"{text_field(result.review, 'comment')}",
             "",
-            "<details><summary>Diff</summary>",
-            "",
-            "```diff",
-            truncate(result.diff, 20000),
-            "```",
-            "</details>",
-            "",
+            # No copy of the diff here: GitLab already shows it in the Changes tab.
             "> Merge request created automatically: review it before merging.",
         ]
     )
