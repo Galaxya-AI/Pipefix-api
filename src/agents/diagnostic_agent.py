@@ -6,6 +6,7 @@ When an error is unknown, it can call the research agent.
 from __future__ import annotations
 
 import os
+import re
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -33,11 +34,23 @@ class DiagnosisOutput(AgentOutput):
     fix_plan: str = Field(..., min_length=10, description="Minimal fix, step by step.")
     confidence: Literal["low", "medium", "high"] = Field(..., description="Confidence level.")
     sources: list[str] = Field(default_factory=list, description="Research URLs used as evidence.")
+    introduced_by: str = Field(
+        "",
+        description="Id (sha, at least 7 characters) of the commit that introduced the error, as shown by "
+        "get_recent_commits; empty if no commit of the history is the cause.",
+    )
 
     @field_validator("files")
     @classmethod
     def files_must_be_relative(cls, files: list[str]) -> list[str]:
         return check_relative_paths(files)
+
+    @field_validator("introduced_by")
+    @classmethod
+    def commit_must_be_a_sha(cls, sha: str) -> str:
+        if sha and not re.fullmatch(r"[0-9a-f]{7,40}", sha):
+            raise ValueError(f"introduced_by must be a commit sha (7 to 40 hexadecimal characters): {sha}")
+        return sha
 
     @field_validator("sources")
     @classmethod
@@ -73,6 +86,9 @@ Rules:
 - Back every statement with something you saw (log line, code line, commit, research source).
 - Propose the MINIMAL fix. Do not propose changing a test to make it pass,
   unless the test itself is clearly wrong; in that case, say so explicitly.
+- When a commit introduced the error, put its sha in introduced_by and name it in root_cause with its short sha,
+  its title and what it changed (e.g. "commit 6a7d016b 'Add helpers' changed + into - in add()").
+  Never write "the latest commit" or "a recent commit" without its sha.
 - If you are not sure, say so with confidence = low.
 - Write in English.
 ALWAYS finish by calling submit_diagnosis."""
