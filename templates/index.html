@@ -40,6 +40,8 @@
 
   form label { display: block; font-weight: 500; font-size: 14px; margin: 16px 0 6px; }
   .help { display: block; color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 2px; }
+  .optional { color: var(--muted); font-weight: 400; }
+  #publish-token-row label { display: block; font-weight: 500; font-size: 14px; margin: 16px 0 6px; }
   input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
           background: var(--surface); color: var(--ink); font: inherit; }
   input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -128,14 +130,15 @@
       <label for="access">Access code
         <span class="help">Given to you by the owner of PipeFix.</span></label>
       <input id="access" type="password" autocomplete="off" required>
-      <label for="url">GitLab URL</label>
-      <input id="url" value="https://gitlab.com" required>
-      <label for="project">Project
-        <span class="help">Path as in the project URL, for example group/my-project</span></label>
-      <input id="project" required>
-      <label for="token">Access token
-        <span class="help">read_api is enough to analyse. Creating the merge request needs the api scope. Used for this run only, never stored.</span></label>
-      <input id="token" type="password" autocomplete="off" required>
+      <label for="project">Project address
+        <span class="help">Copy it from your browser, for example https://gitlab.com/group/my-project.
+          Works with gitlab.com and self-hosted GitLab; a pipeline page address also gives the pipeline number.</span></label>
+      <input id="project" type="url" placeholder="https://gitlab.com/group/my-project" required>
+      <label for="token">Access token <span class="optional">(optional)</span>
+        <span class="help">Not needed to analyse a public project. Needed for a private project (read_api scope) and
+          to create the merge request (api scope). On a free GitLab.com account, use a personal access token
+          (Preferences, Access tokens). Used for this run only, never stored.</span></label>
+      <input id="token" type="password" autocomplete="off">
       <label for="pipeline">Pipeline number
         <span class="help">Shown in GitLab under Build, Pipelines. Empty: the latest failed pipeline.</span></label>
       <input id="pipeline" inputmode="numeric" placeholder="e.g. 2978771">
@@ -164,6 +167,11 @@
             <button class="quiet" id="download" type="button">Download patch</button>
             <p>The merge request is a draft: you review it before merging.</p>
           </div>
+          <div id="publish-token-row" hidden>
+            <label for="publish-token">Access token with the api scope
+              <span class="help">Needed to create the merge request. Used once, never stored.</span></label>
+            <input id="publish-token" type="password" autocomplete="off">
+          </div>
           <p class="error" id="publish-error" role="alert" hidden></p>
           <p class="published" id="published" hidden>Merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
         </div>
@@ -189,7 +197,7 @@ const VERDICTS = {
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],
   error: ["The analysis stopped with an error", "bad"],
 };
-let token = "", runId = "", patch = "";
+let token = "", runId = "", runKey = "", patch = "";
 
 drawTrack(Object.keys(STAGE_LABELS).map((name) => ({ name, state: "pending" })));
 
@@ -199,9 +207,8 @@ $("form").addEventListener("submit", async (event) => {
   token = $("token").value.trim();
   const body = {
     access_code: $("access").value.trim(),
-    gitlab_url: $("url").value.trim(),
+    project_url: $("project").value.trim(),
     gitlab_token: token,
-    project: $("project").value.trim(),
   };
   const pipeline = $("pipeline").value.trim();
   if (pipeline) body.pipeline_id = Number(pipeline);
@@ -209,7 +216,8 @@ $("form").addEventListener("submit", async (event) => {
   try {
     const answer = await send("/web/runs", body);
     runId = answer.run_id;
-    $("run-title").textContent = `Analysing ${body.project}`;
+    runKey = answer.run_key;
+    $("run-title").textContent = `Analysing ${answer.project}`;
     $("run-id").textContent = `Run ${runId}`;
     show("empty", "The agents are working on it. An analysis usually takes one to three minutes.");
     poll();
@@ -220,7 +228,7 @@ $("form").addEventListener("submit", async (event) => {
 });
 
 async function poll() {
-  const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Gitlab-Token": token } });
+  const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
   if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
   const data = await response.json();
   drawTrack(data.stages);
@@ -229,7 +237,7 @@ async function poll() {
   if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
   $("calls").replaceChildren();
   hide("empty");
-  $("run-title").textContent = `Analysis of ${data.run.project || $("project").value}`;
+  $("run-title").textContent = `Analysis of ${data.run.project || ""}`;
   showResult(data.run, data.patch, data.merge_request);
   $("start").disabled = false;
 }
@@ -282,7 +290,15 @@ $("publish").addEventListener("click", async () => {
   $("publish").disabled = true;
   hide("publish-error");
   try {
-    const answer = await send(`/web/runs/${runId}/publish`, null, { "X-Gitlab-Token": token });
+    // The token may have been left empty for the analysis: it is needed now (api scope).
+    if (!token) token = $("publish-token").value.trim();
+    if (!token) {
+      show("publish-token-row");
+      show("publish-error", "Creating the merge request needs an access token with the api scope.");
+      $("publish").disabled = false;
+      return;
+    }
+    const answer = await send(`/web/runs/${runId}/publish`, null, { "X-Run-Key": runKey, "X-Gitlab-Token": token });
     showPublished(answer.merge_request);
   } catch (error) {
     show("publish-error", error.message);

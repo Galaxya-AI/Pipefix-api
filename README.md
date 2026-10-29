@@ -19,12 +19,20 @@ The service listens on http://localhost:8000.
 
 ## Web page (PipeFix)
 
-Open http://localhost:8000 and enter your access code (given by the owner), the
-GitLab URL, the project, a GitLab access token and, optionally, a pipeline number
-(by default the latest failed pipeline). The page shows the progress of each agent,
-then the cause, the fix, the review and the diff. Two actions follow: download the
-patch, or create the draft merge request. The GitLab token is used for that run
-only and never stored.
+Open http://localhost:8000 and enter your access code (given by the owner) and the
+project address as shown in your browser, for example `https://gitlab.com/group/my-project`
+(gitlab.com or a self-hosted GitLab; a pipeline page address also gives the pipeline number).
+Optionally add a pipeline number (by default the latest failed pipeline) and a GitLab access token:
+
+- no token is needed to analyse a public project whose pipelines are public;
+- a private project needs a token with the `read_api` scope;
+- creating the merge request needs a token with the `api` scope (asked for at that moment if it was left empty).
+
+On a free GitLab.com account, project access tokens are not available: use a personal access token
+(Preferences, Access tokens). The token is used for that run only and never stored.
+
+The page shows the progress of each agent, then the cause, the fix, the review and the diff. Two actions
+follow: download the patch, or create the draft merge request.
 
 ## API
 

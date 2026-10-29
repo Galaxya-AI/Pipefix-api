@@ -1,0 +1,142 @@
+"""Tests of the PipeFix web form: one project address, optional token, run key, publish token."""
+
+from __future__ import annotations
+
+import importlib
+import sys
+import threading
+from pathlib import Path
+from typing import Any
+
+import pytest
+from flask.testing import FlaskClient
+
+import startup.services
+from app_runs.run_store import RunStore
+from app_runs.services import ApiServices
+from app_runs.thread_launcher import ThreadLauncher
+from connectors.errors.errors import ConnectorError
+from connectors.gitlab.client import GitLabClient
+from journal.run_journal import RunJournal
+from workflow_analysis.toolbox import Toolbox
+
+
+def fake_run(project: str, pipeline_id: int | None, dry_run: bool, journal: RunJournal) -> dict[str, Any]:
+    """Write a small report and a patch, like a real run."""
+    journal.write_text("fix.patch", "--- a/app.py\n+++ b/app.py\n")
+    report: dict[str, Any] = {"project": project, "status": "dry_run_patch_ready", "dry_run": dry_run}
+    journal.write_report(report)
+    return report
+
+
+@pytest.fixture
+def services(tmp_path: Path) -> ApiServices:
+    store = RunStore(tmp_path)
+    return ApiServices(launcher=ThreadLauncher(fake_run, store), store=store, api_token="t", webhook_secret="s")
+
+
+@pytest.fixture
+def client(services: ApiServices, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FlaskClient:
+    # app.py builds its services when it is imported: give it the fake ones, then import it again.
+    monkeypatch.setattr(startup.services, "build_api_services", lambda: (services, Toolbox([], [])))
+    monkeypatch.delitem(sys.modules, "app", raising=False)
+    app_module = importlib.import_module("app")
+    codes = tmp_path / "access-codes"
+    codes.write_text("recruiter:good-code\n", encoding="utf-8")
+    monkeypatch.setattr(app_module, "ACCESS_CODES_FILE", str(codes))
+    return app_module.app.test_client()
+
+
+def wait_for_runs() -> None:
+    for thread in threading.enumerate():
+        if thread is not threading.current_thread() and thread.daemon:
+            thread.join(5)
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("https://gitlab.com/group/app", ("https://gitlab.com", "group/app", None)),
+        ("https://gitlab.com/group/sub/app/", ("https://gitlab.com", "group/sub/app", None)),
+        ("https://gitlab.com/group/app.git", ("https://gitlab.com", "group/app", None)),
+        ("https://gitlab.com/group/app/-/pipelines/2978771", ("https://gitlab.com", "group/app", 2978771)),
+        ("https://gitlab.example.fr/team/app/-/tree/main", ("https://gitlab.example.fr", "team/app", None)),
+    ],
+)
+def test_project_address_is_split(client: FlaskClient, address: str, expected: tuple[str, str, int | None]) -> None:
+    assert sys.modules["app"].parse_project_url(address) == expected
+
+
+@pytest.mark.parametrize("address", ["http://gitlab.com/group/app", "gitlab.com/group/app", "https://gitlab.com/app"])
+def test_bad_project_address_is_refused(client: FlaskClient, address: str) -> None:
+    response = client.post("/web/runs", json={"access_code": "good-code", "project_url": address})
+    assert response.status_code == 400
+
+
+def test_public_project_runs_without_token_and_only_the_key_reads_it(
+    client: FlaskClient, services: ApiServices, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    used: list[tuple[str, str, bool]] = []
+
+    def user_run_function(url: str, token: str, tools: list[Any]) -> Any:
+        def run(project: str, pipeline_id: int | None, dry_run: bool, journal: RunJournal) -> dict[str, Any]:
+            used.append((url, token, dry_run))
+            return fake_run(project, pipeline_id, dry_run, journal)
+
+        return run
+
+    app_module = sys.modules["app"]
+    monkeypatch.setattr(app_module, "build_user_run_function", user_run_function)
+    monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
+    response = client.post(
+        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.example/group/app"}
+    )
+    assert response.status_code == 202
+    answer = response.get_json()
+    wait_for_runs()
+    assert used == [("https://gitlab.example", "", True)]
+    assert answer["project"] == "group/app"
+    run = client.get(f"/web/runs/{answer['run_id']}", headers={"X-Run-Key": answer["run_key"]}).get_json()
+    assert run["run"]["status"] == "dry_run_patch_ready"
+    assert client.get(f"/web/runs/{answer['run_id']}", headers={"X-Run-Key": "other"}).status_code == 404
+    assert answer["run_key"] not in str(services.store.get_run(answer["run_id"]))
+
+
+def test_private_project_without_token_gets_a_clear_message(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(self: Any, project: str) -> Any:
+        raise ConnectorError("404 Not Found", 404)
+
+    monkeypatch.setattr(sys.modules["app"].GitLabClient, "get_project", refuse)
+    response = client.post("/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"})
+    assert response.status_code == 400
+    assert "read_api" in response.get_json()["message"]
+    with_token = client.post(
+        "/web/runs",
+        json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "gitlab_token": "bad"},
+    )
+    assert "HTTP 404" in with_token.get_json()["message"]
+
+
+def test_access_code_is_still_required(client: FlaskClient) -> None:
+    response = client.post("/web/runs", json={"access_code": "wrong", "project_url": "https://gitlab.com/g/app"})
+    assert response.status_code == 403
+
+
+def test_publish_needs_a_token(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    app_module = sys.modules["app"]
+    monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: fake_run)
+    monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
+    answer = client.post(
+        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"}
+    ).get_json()
+    wait_for_runs()
+    response = client.post(f"/web/runs/{answer['run_id']}/publish", headers={"X-Run-Key": answer["run_key"]})
+    assert response.status_code == 400
+    assert "api scope" in response.get_json()["message"]
+
+
+def test_client_sends_no_token_header_when_empty() -> None:
+    assert "PRIVATE-TOKEN" not in GitLabClient("https://gitlab.com").session.headers
+    assert GitLabClient("https://gitlab.com", "x").session.headers["PRIVATE-TOKEN"] == "x"
