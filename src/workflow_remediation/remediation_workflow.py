@@ -46,6 +46,9 @@ WAIT_FOR_PIPELINE = os.getenv("WAIT_FOR_PIPELINE", "false").strip().lower() in (
 
 PIPELINE_TIMEOUT_S = int(os.getenv("PIPELINE_TIMEOUT_S", "1800"))
 
+# The pipeline already has an open merge request of its fix branch
+STATUS_FIX_ALREADY_PROPOSED = "fix_already_proposed"
+
 
 class RemediationWorkflow:
     """Run the remediation of a failed pipeline: analysis, then publication.
@@ -124,6 +127,12 @@ class RemediationWorkflow:
         refusal: str | None = refusal_status(pipeline)
         if refusal is not None:
             return refusal
+        # A fix of this pipeline is already waiting in an open merge request: no new analysis, no second one.
+        existing = self.platform.find_merge_request(project, fix_branch_name(int(pipeline["id"])))
+        if existing is not None:
+            report["merge_request_url"] = existing.get("web_url")
+            self.journal.log("workflow", "fix_already_proposed", {"url": existing.get("web_url")})
+            return STATUS_FIX_ALREADY_PROPOSED
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
     def run_rounds(self, project: str, pipeline: dict[str, Any], allow_research: bool, report: dict[str, Any]) -> str:
