@@ -350,7 +350,10 @@ def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     last = (run.get("rounds") or [{}])[-1] or {}
     shown = {
-        "diagnosis": {"root_cause": (last.get("diagnosis") or {}).get("root_cause")},
+        "diagnosis": {
+            "root_cause": (last.get("diagnosis") or {}).get("root_cause"),
+            "introduced_by": (last.get("diagnosis") or {}).get("introduced_by"),
+        },
         "fix": {"summary": (last.get("fix") or {}).get("summary")},
         "review": {"comment": (last.get("review") or {}).get("comment")},
         "error": last.get("error"),
