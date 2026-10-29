@@ -261,6 +261,7 @@ function showResult(report, diff, mergeRequest) {
   const round = (report.rounds || []).at(-1) || {};
   const rows = [
     ["Cause", round.diagnosis && round.diagnosis.root_cause],
+    ["Commit", round.diagnosis && round.diagnosis.introduced_by && round.diagnosis.introduced_by.slice(0, 8)],
     ["Fix", round.fix && round.fix.summary],
     ["Review", round.review && round.review.comment],
     ["Error", report.error || round.error],

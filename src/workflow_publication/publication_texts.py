@@ -22,6 +22,15 @@ def text_field(output: Any, name: str, default: str = "") -> str:
     return str(getattr(output, name, default) if output is not None else default)
 
 
+def introduced_by_line(pipeline: dict[str, Any], sha: str) -> str:
+    """Return "**Introduced by**: commit link" for the description, or an empty string."""
+    if not sha:
+        return ""
+    project_url = str(pipeline.get("web_url", "")).split("/-/")[0]
+    commit = f"[`{sha[:8]}`]({project_url}/-/commit/{sha})" if project_url else f"`{sha[:8]}`"
+    return f"**Introduced by**: commit {commit}\n"
+
+
 def merge_request_description(pipeline: dict[str, Any], result: RoundResult, base_moved: bool = False) -> str:
     """Return the Markdown description; `base_moved` means the target got commits after the analysed one."""
     link = str(pipeline.get("web_url") or f"#{pipeline.get('id')}")
@@ -49,6 +58,7 @@ def merge_request_description(pipeline: dict[str, Any], result: RoundResult, bas
             f"**Root cause** ({text_field(result.diagnosis, 'confidence', '?')}): "
             f"{text_field(result.diagnosis, 'root_cause')}",
             "",
+            introduced_by_line(pipeline, text_field(result.diagnosis, "introduced_by")),
             f"**Fix**: {text_field(result.fix, 'summary')}",
             "",
             tests_warning,
