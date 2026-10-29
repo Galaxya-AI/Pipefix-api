@@ -140,3 +140,32 @@ def test_publish_needs_a_token(client: FlaskClient, monkeypatch: pytest.MonkeyPa
 def test_client_sends_no_token_header_when_empty() -> None:
     assert "PRIVATE-TOKEN" not in GitLabClient("https://gitlab.com").session.headers
     assert GitLabClient("https://gitlab.com", "x").session.headers["PRIVATE-TOKEN"] == "x"
+
+
+def test_web_run_shows_no_internal_detail(
+    client: FlaskClient, services: ApiServices, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_module = sys.modules["app"]
+
+    def run_with_tools(project: str, pipeline_id: int | None, dry_run: bool, journal: RunJournal) -> dict[str, Any]:
+        journal.log("diagnosis", "tool_call", {"tool": "search_code", "arguments": {"query": "add"}})
+        report: dict[str, Any] = {
+            "project": project,
+            "status": "dry_run_patch_ready",
+            "policy": {"confidential_projects": ["secret/app"]},
+            "usage": {"llm_calls": 7, "per_agent": {"diagnosis": 3}},
+            "rounds": [{"diagnosis": {"root_cause": "add subtracts", "evidence": "line 9", "fix_plan": "use +"}}],
+        }
+        journal.write_report(report)
+        return report
+
+    monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: run_with_tools)
+    monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
+    answer = client.post(
+        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"}
+    ).get_json()
+    wait_for_runs()
+    body = client.get(f"/web/runs/{answer['run_id']}", headers={"X-Run-Key": answer["run_key"]}).get_data(as_text=True)
+    assert "add subtracts" in body
+    for internal in ("search_code", "tool_call", "evidence", "fix_plan", "llm_calls", "per_agent", "confidential"):
+        assert internal not in body
