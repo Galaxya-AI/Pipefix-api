@@ -13,9 +13,9 @@ Routes:
 - GET  /api/v1/runs/<run_id>/patch           proposed patch (text/x-diff)
 - POST /api/v1/webhooks/gitlab               GitLab "Pipeline Hook" -> 202
 - GET  /                                     PipeFix web page
-- POST /web/runs                             dry run with the visitor's GitLab token -> 202 {"run_id": ...}
-- GET  /web/runs/<run_id>                    status, agents and patch of a web run (X-Gitlab-Token header)
-- POST /web/runs/<run_id>/publish            publish that fix as a draft merge request
+- POST /web/runs                             dry run on the visitor's project -> 202 {"run_id": ..., "run_key": ...}
+- GET  /web/runs/<run_id>                    status, agents and patch of a web run (X-Run-Key header)
+- POST /web/runs/<run_id>/publish            publish that fix as a draft merge request (X-Run-Key + X-Gitlab-Token)
 """
 
 from __future__ import annotations
@@ -24,8 +24,11 @@ import atexit
 import hashlib
 import hmac
 import os
+import re
+import secrets
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
@@ -201,9 +204,13 @@ def gitlab_webhook() -> tuple[Response, int]:
     return jsonify({"status": "started", "run_id": run_id}), 202
 
 
-# Run id -> GitLab URL and hash of the token that started it: only the visitor who started a web run can
-# read or publish it. The token itself is never stored. Kept in memory: web runs use one process, without Redis.
+# Run id -> GitLab URL and hash of the run key given to the visitor who started it: only that visitor can read or
+# publish the run. Neither the key nor the GitLab token is stored. Kept in memory: web runs use one process.
 web_owners: dict[str, tuple[str, str]] = {}
+
+# Project address pasted from the browser: https://<host>/<group>/<subgroups...>/<project>, optionally followed by
+# ".git" or a GitLab page such as "/-/pipelines/123" (the pipeline number is then taken from it).
+PIPELINE_IN_URL = re.compile(r"/-/pipelines/(\d+)")
 
 # The agents of a run, in order, as the web page shows them.
 STAGES = ("triage", "diagnosis", "fixer", "reviewer")
@@ -222,17 +229,37 @@ def access_owner(code: str) -> str | None:
     return None
 
 
-def token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+def secret_hash(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
-def web_owner(run_id: str) -> tuple[str, str]:
-    """Return the GitLab URL and token of a web run; 404 unless the X-Gitlab-Token header started it."""
-    token = request.headers.get("X-Gitlab-Token", "")
+def parse_project_url(address: str) -> tuple[str, str, int | None]:
+    """Split a GitLab project address into (instance URL, project path, pipeline number or None).
+
+    Raises:
+        ValueError: not an https address of a GitLab project (with the reason, shown to the visitor).
+    """
+    parts = urlsplit(address.strip())
+    if parts.scheme != "https" or not parts.netloc:
+        raise ValueError("The project address must start with https://, for example https://gitlab.com/group/project.")
+    path = parts.path
+    match = PIPELINE_IN_URL.search(path)
+    pipeline_id = int(match.group(1)) if match else None
+    # GitLab pages of a project live under "/-/": keep only the project part
+    path = path.split("/-/", 1)[0].strip("/").removesuffix(".git")
+    segments = [segment for segment in path.split("/") if segment]
+    if len(segments) < 2:
+        raise ValueError("Give the address of a project, for example https://gitlab.com/group/project.")
+    return f"https://{parts.netloc}", "/".join(segments), pipeline_id
+
+
+def web_owner(run_id: str) -> str:
+    """Return the GitLab URL of a web run; 404 unless the X-Run-Key header is the key given when it started."""
+    key = request.headers.get("X-Run-Key", "")
     owner = web_owners.get(run_id)
-    if owner is None or not hmac.compare_digest(owner[1], token_hash(token)):
+    if owner is None or not hmac.compare_digest(owner[1], secret_hash(key)):
         abort(404, description=f"Unknown run: {run_id}")
-    return owner[0], token
+    return owner[0]
 
 
 def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:
@@ -258,33 +285,46 @@ def index() -> str:
 
 @app.post("/web/runs")
 def create_web_run() -> tuple[Response, int]:
-    """Start a dry run on the visitor's project with the visitor's GitLab token; nothing is published."""
+    """Start a dry run on the visitor's project; nothing is published.
+
+    JSON body: {"access_code", "project_url", "gitlab_token" (optional), "pipeline_id" (optional)}.
+    The token is optional: a public project whose pipelines are public is read anonymously. It is used for this
+    run only and never stored. The answer carries a run key the page sends back to read or publish the run.
+    """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         abort(400, description="JSON object expected.")
-    gitlab_url = str(body.get("gitlab_url") or "https://gitlab.com").strip().rstrip("/")
-    gitlab_token = str(body.get("gitlab_token", "")).strip()
-    project = str(body.get("project", "")).strip()
-    pipeline_id = body.get("pipeline_id")
     visitor = access_owner(str(body.get("access_code", "")).strip())
     if visitor is None:
         abort(403, description="Unknown access code. Ask the owner of PipeFix for one.")
-    if not gitlab_token or not project:
-        abort(400, description="The GitLab token and the project are required.")
-    if not gitlab_url.startswith("https://"):
-        abort(400, description="The GitLab URL must start with https://.")
+    gitlab_token = str(body.get("gitlab_token", "")).strip()
+    address = str(body.get("project_url", "")).strip()
+    if not address:
+        abort(400, description="The project address is required, for example https://gitlab.com/group/project.")
+    try:
+        gitlab_url, project, pipeline_in_url = parse_project_url(address)
+    except ValueError as error:
+        abort(400, description=str(error))
+    pipeline_id = body.get("pipeline_id") or pipeline_in_url
     if pipeline_id is not None and (not isinstance(pipeline_id, int) or pipeline_id < 1):
-        abort(400, description="The pipeline id must be a positive number.")
+        abort(400, description="The pipeline number must be a positive number.")
     try:
         GitLabClient(gitlab_url, gitlab_token).get_project(project)
     except ConnectorError as error:
-        abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
+        if gitlab_token:
+            abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
+        abort(
+            400,
+            description="This project cannot be read without a token: it is private or does not exist. "
+            "Add an access token with the read_api scope.",
+        )
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
-    web_owners[run_id] = (gitlab_url, token_hash(gitlab_token))
+    run_key = secrets.token_urlsafe(32)
+    web_owners[run_id] = (gitlab_url, secret_hash(run_key))
     # The name only, never the code.
     RunJournal(services.store.runs_dir, run_id, verbose=False).log("web", "visitor", {"name": visitor})
-    return jsonify({"run_id": run_id}), 202
+    return jsonify({"run_id": run_id, "run_key": run_key, "project": project}), 202
 
 
 @app.get("/web/runs/<run_id>")
@@ -319,8 +359,11 @@ def published_merge_request(run_id: str) -> str | None:
 
 @app.post("/web/runs/<run_id>/publish")
 def publish_web_run(run_id: str) -> Response:
-    """Publish the fix shown to the visitor as a draft merge request on the visitor's project."""
-    gitlab_url, gitlab_token = web_owner(run_id)
+    """Publish the fix shown to the visitor as a draft merge request; needs a token with the api scope."""
+    gitlab_url = web_owner(run_id)
+    gitlab_token = request.headers.get("X-Gitlab-Token", "").strip()
+    if not gitlab_token:
+        abort(400, description="Creating the merge request needs an access token with the api scope.")
     report = services.store.read_report(run_id)
     if report is None or report.get("status") != "dry_run_patch_ready":
         abort(409, description="This run has no fix to publish.")

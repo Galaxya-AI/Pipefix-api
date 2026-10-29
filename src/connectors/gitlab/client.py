@@ -20,8 +20,10 @@ def encode(value: str | int) -> str:
 
 
 class GitLabClient(HttpApi):
-    def __init__(self, base_url: str, token: str, timeout_s: int = 30) -> None:
-        super().__init__(f"{base_url.rstrip('/')}/api/v4", {"PRIVATE-TOKEN": token}, timeout_s)
+    def __init__(self, base_url: str, token: str = "", timeout_s: int = 30) -> None:
+        # No token: anonymous calls, enough to read a public project whose pipelines are public.
+        headers = {"PRIVATE-TOKEN": token} if token else {}
+        super().__init__(f"{base_url.rstrip('/')}/api/v4", headers, timeout_s)
 
     def get_project(self, project: str | int) -> dict[str, Any]:
         project_data: dict[str, Any] = self.get_json(f"/projects/{encode(project)}")
