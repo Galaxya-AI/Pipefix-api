@@ -10,8 +10,13 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+import requests
+
 from connectors.errors.errors import ConnectorError
 from connectors.http_client.http_api import HttpApi
+
+# Statuses GitLab returns when an anonymous caller may not use the jobs API.
+ANONYMOUS_REFUSALS = frozenset({401, 403})
 
 
 def encode(value: str | int) -> str:
@@ -23,7 +28,9 @@ class GitLabClient(HttpApi):
     def __init__(self, base_url: str, token: str = "", timeout_s: int = 30) -> None:
         # No token: anonymous calls, enough to read a public project whose pipelines are public.
         headers = {"PRIVATE-TOKEN": token} if token else {}
-        super().__init__(f"{base_url.rstrip('/')}/api/v4", headers, timeout_s)
+        self.web_url = base_url.rstrip("/")
+        self.has_token = bool(token)
+        super().__init__(f"{self.web_url}/api/v4", headers, timeout_s)
 
     def get_project(self, project: str | int) -> dict[str, Any]:
         project_data: dict[str, Any] = self.get_json(f"/projects/{encode(project)}")
@@ -46,7 +53,41 @@ class GitLabClient(HttpApi):
         return list(self.get_json(f"/projects/{encode(project)}/pipelines/{pipeline_id}/jobs", params))
 
     def job_trace(self, project: str | int, job_id: int) -> str:
-        return self.get_text(f"/projects/{encode(project)}/jobs/{job_id}/trace")
+        """Return the log of a job.
+
+        gitlab.com refuses the jobs API to anonymous callers, even on a public project. Without a
+        token, the public log page of the job is read instead, as a browser would.
+        """
+        try:
+            return self.get_text(f"/projects/{encode(project)}/jobs/{job_id}/trace")
+        except ConnectorError as error:
+            if self.has_token or error.status_code not in ANONYMOUS_REFUSALS:
+                raise
+        return self.public_job_log(project, job_id)
+
+    def public_job_log(self, project: str | int, job_id: int) -> str:
+        """Read the raw log page of a job of a public project, without a token."""
+        path = str(project)
+        if path.isdigit():
+            path = str(self.get_project(project)["path_with_namespace"])
+        url = f"{self.web_url}/{path}/-/jobs/{job_id}/raw"
+        refused = ConnectorError(
+            f"The log of job {job_id} is not public: this project needs an access token with the read_api scope.",
+            401,
+        )
+        try:
+            # No redirect: a private log sends the caller to the sign-in page.
+            response = self.session.get(url, timeout=self.timeout_s, allow_redirects=False)
+        except requests.RequestException as error:
+            raise ConnectorError(f"GET {url}: network error ({error})") from error
+        if response.status_code in ANONYMOUS_REFUSALS or 300 <= response.status_code < 400:
+            raise refused
+        if response.status_code >= 400:
+            raise ConnectorError(f"GET {url} -> {response.status_code}", response.status_code)
+        if "text/html" in response.headers.get("Content-Type", ""):
+            raise refused
+        response.encoding = response.encoding or "utf-8"
+        return response.text
 
     def retry_job(self, project: str | int, job_id: int) -> dict[str, Any]:
         job: dict[str, Any] = self.post_json(f"/projects/{encode(project)}/jobs/{job_id}/retry") or {}
