@@ -16,9 +16,22 @@ FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
 
 
 def latest_failed_pipeline(platform: CodePlatform, project: str) -> dict[str, Any] | None:
-    """Return the latest failed pipeline outside the fix branches, or None."""
-    pipelines = platform.list_pipelines(project, status="failed", per_page=20)
-    return next((p for p in pipelines if not str(p.get("ref", "")).startswith(FIX_BRANCH_PREFIX)), None)
+    """Return the latest failure still to fix outside the fix branches, or None.
+
+    A failure is already fixed when a newer pipeline of the same branch passed: it is skipped.
+    """
+    pipelines = platform.list_pipelines(project, per_page=50)
+    passed_branches: set[str] = set()
+    # Newest first: a success seen before a failure of the same branch is newer than it.
+    for pipeline in pipelines:
+        branch = str(pipeline.get("ref", ""))
+        if branch.startswith(FIX_BRANCH_PREFIX):
+            continue
+        if pipeline.get("status") == "success":
+            passed_branches.add(branch)
+        elif pipeline.get("status") == "failed" and branch not in passed_branches:
+            return pipeline
+    return None
 
 
 def find_pipeline(platform: CodePlatform, project: str, pipeline_id: int | None) -> dict[str, Any] | None:

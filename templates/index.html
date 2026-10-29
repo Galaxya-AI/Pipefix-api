@@ -202,7 +202,8 @@ const VERDICTS = {
   not_fixable_by_code: ["Not caused by the code: check the environment or the CI configuration", "warn"],
   infra_flaky: ["Looks temporary: retry the pipeline", "warn"],
   review_rejected: ["The reviewer rejected the proposed fix", "warn"],
-  no_failed_pipeline: ["No failed pipeline found in this project", "warn"],
+  no_failed_pipeline: ["Nothing to fix: no failed pipeline, or the latest pipelines of each branch passed", "ok"],
+  pipeline_success: ["This pipeline passed: there is nothing to fix", "ok"],
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],
   error: ["The analysis stopped with an error", "bad"],
 };
@@ -219,9 +220,11 @@ $("form").addEventListener("submit", async (event) => {
     project_url: $("project").value.trim(),
     gitlab_token: token,
   };
+  // Sent as typed ("123" or "#123"): the server checks it and never falls back to another pipeline.
   const pipeline = $("pipeline").value.trim();
-  if (pipeline) body.pipeline_id = Number(pipeline);
+  if (pipeline) body.pipeline_id = pipeline;
   $("start").disabled = true;
+  pollFailures = 0;
   try {
     const answer = await send("/web/runs", body);
     runId = answer.run_id;
@@ -236,10 +239,31 @@ $("form").addEventListener("submit", async (event) => {
   }
 });
 
+// Network failures in a row tolerated while following a run (about 30 seconds) before giving up.
+const MAX_POLL_FAILURES = 12;
+let pollFailures = 0;
+
 async function poll() {
-  const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
-  if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
-  const data = await response.json();
+  let response, data;
+  try {
+    response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
+    if (response.ok) data = await response.json();
+  } catch (error) {
+    // Network cut or server restarting: try again instead of freezing the page.
+    pollFailures += 1;
+    if (pollFailures <= MAX_POLL_FAILURES) { setTimeout(poll, 2500); return; }
+    hide("empty");
+    show("form-error", "PipeFix does not answer any more. Reload the page and start the analysis again.");
+    $("start").disabled = false;
+    return;
+  }
+  pollFailures = 0;
+  if (!response.ok) {
+    hide("empty");
+    show("form-error", "This analysis is no longer available (PipeFix may have restarted). Start it again.");
+    $("start").disabled = false;
+    return;
+  }
   drawTrack(data.stages);
   const status = data.run ? data.run.status : "running";
   if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
@@ -262,7 +286,9 @@ function drawTrack(stages) {
 }
 
 function showResult(report, diff, mergeRequest) {
-  const [text, level] = VERDICTS[report.status] || [`Finished: ${report.status}`, "warn"];
+  const [text, level] = VERDICTS[report.status] || (String(report.status).endsWith("_failed")
+    ? ["The analysis could not finish. Try again, or give the number of the failed pipeline.", "warn"]
+    : [`Finished: ${report.status}`, "warn"]);
   $("verdict").className = `verdict ${level}`;
   $("verdict-text").textContent = text;
   const round = (report.rounds || []).at(-1) || {};
