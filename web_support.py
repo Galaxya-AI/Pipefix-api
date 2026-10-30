@@ -11,6 +11,9 @@ from urllib.parse import urlsplit
 
 from flask import abort, request
 
+from app_runs.run_store import RunStore
+from connectors.errors.errors import ConnectorError
+from connectors.gitlab.client import GitLabClient
 from workflow_publication.publisher import MERGE_REQUEST_FILE
 
 ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
@@ -56,6 +59,36 @@ def parse_project_url(address: str) -> tuple[str, str, int | None]:
     return f"https://{parts.netloc}", "/".join(segments), pipeline_id
 
 
+def read_pipeline_number(value: Any) -> int | None:
+    """Return the pipeline number typed in the form ("3005959635" or "#3005959635"), None when empty.
+
+    Anything else is refused: a number typed wrongly must never fall back to the latest failed pipeline.
+    """
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lstrip("#").strip()
+    if not text.isdigit() or int(text) < 1:
+        abort(400, description="The pipeline number must be a number, for example 2978771 or #2978771.")
+    return int(text)
+
+
+def check_pipeline_to_fix(gitlab: GitLabClient, project: str, pipeline_id: int) -> None:
+    """Answer at once, before any agent runs, when the pipeline is missing or has nothing to fix."""
+    try:
+        pipeline = gitlab.get_pipeline(project, pipeline_id)
+    except ConnectorError as error:
+        if error.status_code == 404:
+            abort(400, description=f"Pipeline #{pipeline_id} does not exist in the project {project}.")
+        raise
+    status = str(pipeline.get("status", ""))
+    if status == "success":
+        abort(400, description=f"Pipeline #{pipeline_id} passed: there is nothing to fix.")
+    if status in ("created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"):
+        abort(400, description=f"Pipeline #{pipeline_id} is still running: try again once it has failed.")
+    if status != "failed":
+        abort(400, description=f"Pipeline #{pipeline_id} did not fail (status: {status}): there is nothing to fix.")
+
+
 def web_owner(run_id: str) -> str:
     """Return the GitLab URL of a web run; 404 unless the X-Run-Key header is the key given when it started."""
     key = request.headers.get("X-Run-Key", "")
@@ -63,6 +96,26 @@ def web_owner(run_id: str) -> str:
     if owner is None or not hmac.compare_digest(owner[1], secret_hash(key)):
         abort(404, description=f"Unknown run: {run_id}")
     return owner[0]
+
+
+def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
+    if run is None:
+        return None
+    last = (run.get("rounds") or [{}])[-1] or {}
+    shown = {
+        "diagnosis": {
+            "root_cause": (last.get("diagnosis") or {}).get("root_cause"),
+            "introduced_by": (last.get("diagnosis") or {}).get("introduced_by"),
+        },
+        "fix": {"summary": (last.get("fix") or {}).get("summary")},
+        "review": {"comment": (last.get("review") or {}).get("comment")},
+        # An agent that could not finish: the reason is for the developers' logs, not for the visitor.
+        "error": None if str(run.get("status", "")).endswith("_failed") else last.get("error"),
+    }
+    view = {key: run.get(key) for key in ("status", "project", "error", "merge_request_url") if run.get(key)}
+    view["rounds"] = [shown] if run.get("rounds") else []
+    return view
 
 
 def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:
@@ -81,7 +134,7 @@ def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str,
     return states
 
 
-def published_merge_request(run_id: str, store: Any) -> str | None:
+def published_merge_request(run_id: str, store: RunStore) -> str | None:
     folder = store.folder(run_id)
     if folder is None or not (folder / MERGE_REQUEST_FILE).is_file():
         return None

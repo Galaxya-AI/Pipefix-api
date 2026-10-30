@@ -160,9 +160,14 @@ class RemediationWorkflow:
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             if self.wait_for_pipeline and not self.dry_run:
                 failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
-                signature = failed_job_signature(failing_jobs)
+                traces = {
+                    int(job["id"]): self.platform.job_trace(project, int(job["id"]))
+                    for job in failing_jobs
+                    if not job.get("allow_failure")
+                }
+                signature = failed_job_signature(failing_jobs, traces)
                 if signature and signature in seen_failures:
-                    report["error"] = "The same failed jobs were observed again; manual review required."
+                    report["error"] = "The same job failures were observed again; manual review required."
                     return "repeated_failure"
                 if signature:
                     seen_failures.add(signature)
@@ -197,7 +202,9 @@ class RemediationWorkflow:
             validation = validation_record(finished, sha)
             report["validations"][-1].update(validation)
             report["validation"] = validation
-            if finished is not None and str(finished.get("sha", "")) != sha:
+            if finished is None:
+                return "pipeline_timeout"
+            if str(finished.get("sha", "")) != sha:
                 report["error"] = "Pipeline SHA does not match the proposed fix commit."
                 return "pipeline_sha_mismatch"
             status = outcome_status(finished)

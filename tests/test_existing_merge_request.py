@@ -64,10 +64,10 @@ def test_open_merge_request_allows_independent_analysis(tmp_path: Path, monkeypa
     assert report["usage"]["llm_calls"] == 0
 
 
-def test_without_existing_merge_request_keeps_standard_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_existing_merge_request_uses_run_scoped_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     platform, round_ = Platform(None), Round()
     report = run(tmp_path, monkeypatch, platform, round_)
     assert report["status"] == "no_fix"
-    assert report["fix_branch"] == "auto-fix/pipeline-42"
+    assert report["fix_branch"] == f"auto-fix/pipeline-42-{report['run_id']}"
     assert "previous_merge_request_url" not in report
     assert round_.calls == 1
