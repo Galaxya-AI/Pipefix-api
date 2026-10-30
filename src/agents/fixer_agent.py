@@ -56,9 +56,11 @@ Method:
    and long enough to be unique in the file.
 3. Check the result with view_changeset.
 4. If a previous review reported problems, fix them.
+5. The diagnosis may list several causes: fix ALL of them in this attempt, not only the first,
+   so that the next pipeline does not stop on an error already known.
 
 Rules:
-- Change as few lines as possible; keep the style of the file.
+- For each cause, change as few lines as possible; keep the style of the file.
 - Never delete a test and never weaken an assertion to make a pipeline pass.
 - Do not touch the CI configuration unless the diagnosis requires it (ci_config category).
 - Do not add any secret, password or token.

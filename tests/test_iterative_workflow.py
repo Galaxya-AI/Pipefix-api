@@ -3,8 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from workflow_remediation.remediation_workflow import RemediationWorkflow
 from workflow_publication.pipeline_waiter import PipelineWaiter
+from workflow_remediation.remediation_workflow import RemediationWorkflow
 
 
 def make_workflow(outcomes):

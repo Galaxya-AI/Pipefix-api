@@ -51,7 +51,8 @@ Check:
 1. Does the diff fix the root cause (and not only the symptom)?
 2. Side effects: other code calling the changed function (search_code), compatibility.
 3. Tests: no test deleted or weakened to make the pipeline pass.
-4. Scope: no unrelated change; no secret added.
+4. Scope: no unrelated change; no secret added. Changes that fix the several causes listed
+   in the diagnosis are in scope: do not reject a fix because it covers more than one error.
 5. Syntax: is the changed code valid (indentation, parentheses, imports)? Re-read the full file if needed.
 
 Rules:

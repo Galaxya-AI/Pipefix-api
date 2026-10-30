@@ -37,9 +37,14 @@ class CodePlatform(Protocol):
     def create_branch(self, project: str | int, branch: str, ref: str) -> dict[str, Any]: ...
 
     def create_commit(
-        self, project: str | int, branch: str, message: str, actions: list[dict[str, str]]
+        self,
+        project: str | int,
+        branch: str,
+        message: str,
+        actions: list[dict[str, str]],
+        start_sha: str | None = None,
     ) -> dict[str, Any]:
-        """Create a commit on an existing branch."""
+        """Create a commit; with start_sha, the branch is created from that commit in the same call."""
         ...
 
     def find_merge_request(self, project: str | int, source_branch: str) -> dict[str, Any] | None:

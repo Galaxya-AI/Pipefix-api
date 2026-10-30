@@ -69,6 +69,12 @@ Method:
 5. If the error is unknown to you (new library version, unusual message), call the research agent (call_research).
 6. Distinguish the cause (e.g. wrong operator in add()) from the symptom (e.g. test_add fails).
 
+Several errors:
+- A log often shows several errors at once (failed tests, collection errors, lint errors).
+  Diagnose ALL of them, not only the first: in root_cause, list each distinct cause;
+  in files, every file to change; in fix_plan, one step per cause.
+- Errors with the same cause (e.g. the same missing import in several files) are one cause.
+
 Rules:
 - Back every statement with something you saw (log line, code line, commit, research source).
 - Propose the MINIMAL fix. Do not propose changing a test to make it pass,

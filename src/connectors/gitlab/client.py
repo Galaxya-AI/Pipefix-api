@@ -112,10 +112,21 @@ class GitLabClient(HttpApi):
         return created
 
     def create_commit(
-        self, project: str | int, branch: str, message: str, actions: list[dict[str, str]]
+        self,
+        project: str | int,
+        branch: str,
+        message: str,
+        actions: list[dict[str, str]],
+        start_sha: str | None = None,
     ) -> dict[str, Any]:
-        """Create a commit on an existing branch; actions hold action, file_path and content."""
-        body = {"branch": branch, "commit_message": message, "actions": actions}
+        """Create a commit; actions hold action, file_path and content.
+
+        With start_sha, GitLab first creates `branch` from that commit, in the same call,
+        so no pipeline runs on the branch before the fix is in it.
+        """
+        body: dict[str, Any] = {"branch": branch, "commit_message": message, "actions": actions}
+        if start_sha:
+            body["start_sha"] = start_sha
         commit: dict[str, Any] = self.post_json(f"/projects/{encode(project)}/repository/commits", body) or {}
         return commit
 

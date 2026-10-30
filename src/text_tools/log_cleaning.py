@@ -52,6 +52,54 @@ def truncate(text: str, max_chars: int) -> str:
     return f"{text[:head_size]}\n[... {removed} characters cut ...]\n{text[-tail_size:]}"
 
 
+# Lines that name an error, wherever they are in the log: pytest summary and collection
+# errors, Python exceptions, ruff/flake8 (path:line:col: F401 ...) and mypy (path:line: error:).
+ERROR_LINE_PATTERN = re.compile(
+    r"^(?:FAILED |ERROR |E\s{2,}\S"
+    r"|\S+\.py:\d+:(?:\d+:)? (?:[A-Z]{1,3}\d{2,4}\b|error:)"
+    r"|(?:\w+\.)*\w*(?:Error|Exception): "
+    r"|Interrupted: |Found \d+ errors?)"
+)
+
+# Parts that change from one run to the next for the same error: durations, hex ids, timestamps
+VOLATILE_PATTERN = re.compile(r"\bin \d+(?:\.\d+)?s\b|0x[0-9a-f]+|\b\d{4}-\d{2}-\d{2}[T ][\d:.]+\S*")
+
+SUMMARY_MAX_LINES = 80
+
+
+def error_summary(text: str, max_lines: int = SUMMARY_MAX_LINES) -> list[str]:
+    """Return every distinct error line of a cleaned log, in order (at most max_lines).
+
+    The tail of a log shows the last error only; this list shows all of them,
+    e.g. the 50 failed tests of a pytest run or every unused import found by ruff.
+    """
+    found: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if ERROR_LINE_PATTERN.match(stripped) and stripped not in found:
+            found.append(stripped)
+            if len(found) >= max_lines:
+                break
+    return found
+
+
+def failure_fingerprint(text: str) -> str:
+    """Return the error lines of a raw log without durations or ids, to recognise a repeated failure."""
+    lines = error_summary(strip_ansi(text), max_lines=200)
+    if not lines:
+        # No known error line: fall back on the end of the log
+        lines = keep_tail(strip_ansi(text), 20).splitlines()
+    return "\n".join(VOLATILE_PATTERN.sub("", line) for line in lines)
+
+
 def clean_log(text: str, max_lines: int = 300) -> str:
-    """Prepare a CI log for an LLM: strip codes, keep the end, mask secrets."""
-    return mask_secrets(keep_tail(strip_ansi(text), max_lines))
+    """Prepare a CI log for an LLM: strip codes, list all the errors, keep the end, mask secrets."""
+    cleaned = strip_ansi(text)
+    tail = keep_tail(cleaned, max_lines)
+    tail_lines = {line.strip() for line in tail.splitlines()}
+    # Errors already visible in the tail are not repeated
+    hidden = [line for line in error_summary(cleaned) if line not in tail_lines]
+    if hidden:
+        header = "Errors found earlier in the log (the end of the log follows):"
+        tail = "\n".join([header, *hidden, "", "--- end of the log ---", tail])
+    return mask_secrets(tail)
