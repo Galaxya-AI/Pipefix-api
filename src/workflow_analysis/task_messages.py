@@ -16,8 +16,8 @@ def as_json(output: AgentOutput) -> str:
     return json.dumps(output.model_dump(), ensure_ascii=False, indent=2)
 
 
-def pipeline_context(project: str, pipeline: dict[str, Any], jobs: list[dict[str, Any]], first_log: str) -> str:
-    """Return the context shared by every agent: pipeline, failed jobs and end of the first job's log."""
+def pipeline_context(project: str, pipeline: dict[str, Any], jobs: list[dict[str, Any]], logs: str) -> str:
+    """Return the failed jobs and bounded log excerpts for the agents."""
     commit = str(pipeline.get("sha", ""))[:8]
     lines = [
         "## Failed pipeline",
@@ -29,7 +29,7 @@ def pipeline_context(project: str, pipeline: dict[str, Any], jobs: list[dict[str
         lines.append(
             f'- job {job.get("id")} "{job.get("name")}" (stage {job.get("stage")}, reason: {job.get("failure_reason")})'
         )
-    lines += ["", f"End of the log of job {jobs[0].get('id')}:", "```", first_log, "```"]
+    lines += ["", "Failed job log excerpts:", "```", logs, "```"]
     return "\n".join(lines)
 
 

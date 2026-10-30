@@ -141,8 +141,13 @@ class RemediationWorkflow:
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
     def run_rounds(self, project: str, pipeline: dict[str, Any], allow_research: bool, report: dict[str, Any]) -> str:
-        """Run "analyse -> publish -> wait" rounds until a final status."""
+        """Accumulate corrections on one branch; open a draft MR only after CI succeeds.
+
+        With WAIT_FOR_PIPELINE disabled we retain the original single-fix workflow.
+        Every wait is pinned to the SHA returned by GitLab, not just the branch.
+        """
         current = pipeline
+<<<<<<< HEAD
         seen_failures: set[tuple[str, ...]] = set()
         for round_number in range(1, self.max_rounds + 1):
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
@@ -164,6 +169,27 @@ class RemediationWorkflow:
                 return "repeated_failure"
             if signature:
                 seen_failures.add(signature)
+=======
+        branch = fix_branch_name(int(pipeline["id"]), self.journal.run_id)
+        seen_failures: set[tuple[str, ...]] = set()
+        last_result: RoundResult | None = None
+        for round_number in range(1, self.max_rounds + 1):
+            self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
+            if self.wait_for_pipeline and not self.dry_run:
+                failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
+                signature = tuple(
+                    sorted(
+                        f"{job.get('name', '')}:{job.get('failure_reason', '')}:"
+                        f"{self.platform.job_trace(project, int(job['id']))[-1000:]}"
+                        for job in failing_jobs
+                    )
+                )
+                if signature and signature in seen_failures:
+                    report["error"] = "The same failed jobs were observed again; manual review required."
+                    return "repeated_failure"
+                if signature:
+                    seen_failures.add(signature)
+>>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
             result = self.remediation_round.run(project, current, allow_research)
             report["rounds"].append(result.as_report())
             if result.status != "fix_ready":
@@ -171,6 +197,7 @@ class RemediationWorkflow:
             if self.dry_run:
                 report["validation"] = {"verified": False, "reason": "dry_run"}
                 report["patch_file"] = str(self.journal.write_text("fix.patch", result.diff))
+<<<<<<< HEAD
                 # Lets the web page publish this exact fix later, without a new analysis.
                 self.journal.write_text(SAVED_FIX_FILE, json.dumps(
                     {"pipeline": pipeline,
@@ -178,9 +205,20 @@ class RemediationWorkflow:
                     "branch": report["fix_branch"]}
                     )
                 )
+=======
+                self.journal.write_text(SAVED_FIX_FILE, json.dumps({"pipeline": pipeline, "files": result.files}))
+>>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
                 return "dry_run_patch_ready"
-            commit = self.publish_fix(project, pipeline, result, report)
+
+            # Fixes in later rounds are applied to the SAME working branch.
+            # Do not publish an MR until the full fix-branch pipeline has passed.
+            last_result = result
+            commit = self.commit_fix(project, pipeline, branch, result)
+            sha = str(commit.get("id", ""))
+            report["fix_branch"] = branch
+            report.setdefault("validation", []).append({"round": round_number, "commit_sha": sha})
             if not self.wait_for_pipeline:
+<<<<<<< HEAD
                 report["validation"] = {"verified": False, "reason": "not_requested"}
                 return "merge_request_opened"
             finished: dict[str, Any] | None = self.waiter.wait(
@@ -197,11 +235,35 @@ class RemediationWorkflow:
             # Still failing: new round on the fix pipeline
             current = finished
         report["validation"] = {"verified": False, "reason": "max_rounds_reached"}
+=======
+                self.open_fix_mr(project, pipeline, branch, result, report)
+                return "merge_request_opened"
+            if not sha:
+                report["error"] = "GitLab did not return a commit SHA; cannot verify the pipeline."
+                return "validation_unavailable"
+            finished = self.waiter.wait(project, branch, sha, self.pipeline_timeout_s)
+            validation = report["validation"][-1]
+            validation["pipeline_id"] = finished.get("id") if finished else None
+            validation["status"] = finished.get("status") if finished else "timeout"
+            if finished is not None and str(finished.get("sha", "")) != sha:
+                report["error"] = "Pipeline SHA does not match the proposed fix commit."
+                return "validation_sha_mismatch"
+            status = outcome_status(finished)
+            if status == "pipeline_fixed":
+                self.open_fix_mr(project, pipeline, branch, last_result, report)
+                return "pipeline_fixed"
+            if status is not None:
+                return status
+            # The next round reads files at this fix-branch pipeline's commit.
+            current = finished
+        report["error"] = "The iteration limit was reached; no MR was opened without passing CI."
+>>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
         return "max_rounds_reached"
 
-    def publish_fix(
-        self, project: str, pipeline: dict[str, Any], result: RoundResult, report: dict[str, Any]
+    def commit_fix(
+        self, project: str, pipeline: dict[str, Any], branch: str, result: RoundResult
     ) -> dict[str, Any]:
+<<<<<<< HEAD
         """Publish an approved fix: fix branch if missing, commit, merge request on the first round.
 
         The fix branch starts from the analysed commit, not from the current head
@@ -211,14 +273,29 @@ class RemediationWorkflow:
         target_branch = str(pipeline.get("ref", ""))
         analysed_sha = str(pipeline.get("sha", ""))
         branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"])))
+=======
+        """Commit on the isolated work branch, never directly on the target."""
+>>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
         if not self.platform.branch_exists(project, branch):
-            self.publisher.create_branch(project, branch, analysed_sha)
-        commit = self.publisher.commit(project, branch, result)
-        if "merge_request" not in report:
-            base_moved = self.platform.branch_head(project, target_branch) != analysed_sha
-            report["base_moved"] = base_moved
-            merge_request = self.publisher.open_merge_request(
-                project, branch, target_branch, pipeline, result, base_moved
+            self.publisher.create_branch(project, branch, str(pipeline.get("sha", "")))
+        return self.publisher.commit(project, branch, result)
+
+    def open_fix_mr(
+        self,
+        project: str,
+        pipeline: dict[str, Any],
+        branch: str,
+        result: RoundResult,
+        report: dict[str, Any],
+    ) -> None:
+        target = str(pipeline.get("ref", ""))
+        base_moved = self.platform.branch_head(project, target) != str(pipeline.get("sha", ""))
+        report["base_moved"] = base_moved
+        if base_moved:
+            report["error"] = (
+                "Target branch advanced since diagnosis; re-run analysis on the new base "
+                "before opening a merge request."
             )
-            report["merge_request"] = merge_request.get("web_url")
-        return commit
+            raise ConnectorError(report["error"])
+        mr = self.publisher.open_merge_request(project, branch, target, pipeline, result, base_moved)
+        report["merge_request"] = mr.get("web_url")
