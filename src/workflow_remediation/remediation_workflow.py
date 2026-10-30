@@ -148,9 +148,16 @@ class RemediationWorkflow:
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             # Track remaining failures without treating the same job names as proof
             # of a successful repair. Repeated failures are surfaced for human review.
-            failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed") 
-            if self.wait_for_pipeline and not self.dry_run 
-            else []
+
+            failing_jobs = (
+                self.platform.pipeline_jobs(
+                    project,
+                    int(current["id"]),
+                    scope="failed",
+                )
+                if self.wait_for_pipeline and not self.dry_run
+                else []
+            )
             signature = failed_job_signature(failing_jobs)
             if signature and signature in seen_failures:
                 report["warning"] = "The same jobs failed after an attempted fix; manual review is required."
