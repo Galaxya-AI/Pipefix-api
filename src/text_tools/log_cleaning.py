@@ -9,6 +9,10 @@ ANSI_PATTERN = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 # GitLab collapsible section markers
 SECTION_PATTERN = re.compile(r"section_(?:start|end):\d+:[^\r\n]*?\r")
 
+# Prefix of each line when the GitLab runner adds timestamps, e.g. "2026-10-30T21:45:12.123456Z 00O "
+# (stream 00, O for stdout or E for stderr, "+" for a continued line).
+TIMESTAMP_PREFIX_PATTERN = re.compile(r"(?m)^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z \d{2}[OE]\+? ?")
+
 SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"glpat-[A-Za-z0-9_\-]{10,}"), "glpat-***"),
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), "sk-***"),
@@ -23,7 +27,8 @@ def strip_ansi(text: str) -> str:
     """Remove colour codes and section markers, and normalise line endings."""
     cleaned = SECTION_PATTERN.sub("", text)
     cleaned = ANSI_PATTERN.sub("", cleaned)
-    return cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    return TIMESTAMP_PREFIX_PATTERN.sub("", cleaned)
 
 
 def mask_secrets(text: str) -> str:

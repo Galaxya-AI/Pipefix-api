@@ -21,7 +21,7 @@ from changeset.changeset import Changeset
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
-from text_tools.log_cleaning import clean_log, error_summary, mask_secrets, strip_ansi
+from text_tools.log_cleaning import clean_log, error_summary, keep_tail, mask_secrets, strip_ansi
 from tools.tool import Tool
 from workflow_analysis.task_messages import diagnosis_task, fix_task, pipeline_context, review_task
 from workflow_analysis.toolbox import build_run_registry
@@ -102,8 +102,11 @@ class RemediationRound:
         """Record the error lines of each failed job, so the web page can show them for this round."""
         shown = []
         for job in jobs[:MAX_CONTEXT_JOBS]:
-            trace = traces.get(int(job["id"]), "")
-            lines = error_summary(mask_secrets(strip_ansi(trace)), ERRORS_SHOWN_PER_JOB)
+            cleaned = mask_secrets(strip_ansi(traces.get(int(job["id"]), "")))
+            lines = error_summary(cleaned, ERRORS_SHOWN_PER_JOB)
+            # No known error line: the end of the log usually says what failed
+            if not lines:
+                lines = [line for line in keep_tail(cleaned, ERRORS_SHOWN_PER_JOB // 2).splitlines() if line.strip()]
             shown.append({"job": str(job.get("name", "")), "url": job.get("web_url"), "lines": lines})
         details = {"pipeline": pipeline.get("id"), "pipeline_url": pipeline.get("web_url"), "jobs": shown}
         self.journal.log("remediation_round", "errors", details)
