@@ -27,14 +27,6 @@ import secrets
 from typing import Any
 
 from flask import Flask, Response, abort, jsonify, render_template, request
-from werkzeug.exceptions import HTTPException
-
-from app_runs.launcher import LaunchError
-from app_runs.thread_launcher import ThreadLauncher
-from connectors.errors.errors import ConnectorError
-from connectors.gitlab.client import GitLabClient
-from journal.run_journal import RunJournal
-from startup.services import build_api_services, build_user_run_function
 from web_support import (
     access_owner,
     check_pipeline_to_fix,
@@ -47,6 +39,14 @@ from web_support import (
     web_owner,
     web_owners,
 )
+from werkzeug.exceptions import HTTPException
+
+from app_runs.launcher import LaunchError
+from app_runs.thread_launcher import ThreadLauncher
+from connectors.errors.errors import ConnectorError
+from connectors.gitlab.client import GitLabClient
+from journal.run_journal import RunJournal
+from startup.services import build_api_services, build_user_run_function
 from workflow_publication.publisher import publish_saved_fix
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
