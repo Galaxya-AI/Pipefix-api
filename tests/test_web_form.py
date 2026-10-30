@@ -43,7 +43,7 @@ def client(services: ApiServices, monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     app_module = importlib.import_module("app")
     codes = tmp_path / "access-codes"
     codes.write_text("recruiter:good-code\n", encoding="utf-8")
-    monkeypatch.setattr(app_module, "ACCESS_CODES_FILE", str(codes))
+    monkeypatch.setattr(sys.modules["web_support"], "ACCESS_CODES_FILE", str(codes))
     return app_module.app.test_client()
 
 

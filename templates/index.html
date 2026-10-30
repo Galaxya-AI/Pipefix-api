@@ -230,7 +230,14 @@ $("form").addEventListener("submit", async (event) => {
 async function poll() {
   const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
   if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
-  const data = await response.json();
+  let data;
+  try {
+    data = await readJson(response);
+  } catch (error) {
+    show("form-error", error.message);
+    $("start").disabled = false;
+    return;
+  }
   drawTrack(data.stages);
   $("calls").replaceChildren(...data.calls.map((call) => tag("li", `${call.agent} called ${call.tool}`)));
   const status = data.run ? data.run.status : "running";
@@ -327,8 +334,20 @@ async function send(url, body, headers = {}) {
     headers: { "Content-Type": "application/json", ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const answer = await response.json();
-  if (!response.ok) throw new Error(answer.message || "The request failed.");
+  return readJson(response);
+}
+async function readJson(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(`Server returned HTTP ${response.status} with a non-JSON response. Check PipeFix/OpenShift logs.`);
+  }
+  let answer;
+  try {
+    answer = await response.json();
+  } catch {
+    throw new Error(`Server returned invalid JSON (HTTP ${response.status}).`);
+  }
+  if (!response.ok) throw new Error(answer.message || `Request failed (HTTP ${response.status}).`);
   return answer;
 }
 function tag(name, text) { const node = document.createElement(name); node.textContent = text; return node; }

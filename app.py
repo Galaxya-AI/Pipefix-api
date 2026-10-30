@@ -21,14 +21,10 @@ Routes:
 from __future__ import annotations
 
 import atexit
-import hashlib
 import hmac
 import os
-import re
 import secrets
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
@@ -39,7 +35,15 @@ from connectors.errors.errors import ConnectorError
 from connectors.gitlab.client import GitLabClient
 from journal.run_journal import RunJournal
 from startup.services import build_api_services, build_user_run_function
-from workflow_publication.publisher import MERGE_REQUEST_FILE, publish_saved_fix
+from workflow_publication.publisher import publish_saved_fix
+from web_support import (
+    access_owner,
+    parse_project_url,
+    published_merge_request,
+    stage_states,
+    web_owner,
+    web_owners,
+)
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
@@ -47,9 +51,6 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 # Pipelines of these branches are ignored: they are the system's own fix branches
 FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
 
-# One "name:code" per line, given by the owner to each visitor of the web page. In OpenShift it is a mounted
-# secret: edited in the console, the file changes without a restart, so it is read again at each new run.
-ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
 
 app = Flask(__name__)
 
@@ -62,6 +63,15 @@ atexit.register(toolbox.close)
 def http_error(error: HTTPException) -> tuple[Response, int]:
     """Return HTTP errors as JSON instead of HTML."""
     return jsonify({"error": error.name, "message": error.description}), error.code or 500
+
+
+@app.errorhandler(Exception)
+def unexpected_error(error: Exception) -> tuple[Response, int]:
+    """Never return a Flask HTML traceback to callers expecting API JSON."""
+    app.logger.exception("Unhandled request failure", exc_info=error)
+    if request.path.startswith(("/api/", "/web/")):
+        return jsonify({"error": "Internal Server Error", "message": "Request failed; consult server logs."}), 500
+    return jsonify({"error": "Internal Server Error", "message": "Request failed."}), 500
 
 
 @app.before_request
@@ -204,78 +214,14 @@ def gitlab_webhook() -> tuple[Response, int]:
     return jsonify({"status": "started", "run_id": run_id}), 202
 
 
-# Run id -> GitLab URL and hash of the run key given to the visitor who started it: only that visitor can read or
-# publish the run. Neither the key nor the GitLab token is stored. Kept in memory: web runs use one process.
-web_owners: dict[str, tuple[str, str]] = {}
-
-# Project address pasted from the browser: https://<host>/<group>/<subgroups...>/<project>, optionally followed by
-# ".git" or a GitLab page such as "/-/pipelines/123" (the pipeline number is then taken from it).
-PIPELINE_IN_URL = re.compile(r"/-/pipelines/(\d+)")
-
-# The agents of a run, in order, as the web page shows them.
-STAGES = ("triage", "diagnosis", "fixer", "reviewer")
 
 
-def access_owner(code: str) -> str | None:
-    """Return the name of the visitor who holds this access code, or None (no file: nobody)."""
-    try:
-        lines = Path(ACCESS_CODES_FILE).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    for line in lines:
-        name, _, expected = line.strip().partition(":")
-        if name and expected and hmac.compare_digest(code.encode(), expected.encode()):
-            return name
-    return None
 
 
-def secret_hash(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
-def parse_project_url(address: str) -> tuple[str, str, int | None]:
-    """Split a GitLab project address into (instance URL, project path, pipeline number or None).
-
-    Raises:
-        ValueError: not an https address of a GitLab project (with the reason, shown to the visitor).
-    """
-    parts = urlsplit(address.strip())
-    if parts.scheme != "https" or not parts.netloc:
-        raise ValueError("The project address must start with https://, for example https://gitlab.com/group/project.")
-    path = parts.path
-    match = PIPELINE_IN_URL.search(path)
-    pipeline_id = int(match.group(1)) if match else None
-    # GitLab pages of a project live under "/-/": keep only the project part
-    path = path.split("/-/", 1)[0].strip("/").removesuffix(".git")
-    segments = [segment for segment in path.split("/") if segment]
-    if len(segments) < 2:
-        raise ValueError("Give the address of a project, for example https://gitlab.com/group/project.")
-    return f"https://{parts.netloc}", "/".join(segments), pipeline_id
 
 
-def web_owner(run_id: str) -> str:
-    """Return the GitLab URL of a web run; 404 unless the X-Run-Key header is the key given when it started."""
-    key = request.headers.get("X-Run-Key", "")
-    owner = web_owners.get(run_id)
-    if owner is None or not hmac.compare_digest(owner[1], secret_hash(key)):
-        abort(404, description=f"Unknown run: {run_id}")
-    return owner[0]
-
-
-def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:
-    """State of each agent: pending, running, done, or stopped when the run ended during it."""
-    started = {event.get("actor") for event in events if event.get("event") == "start"}
-    done = {event.get("actor") for event in events if event.get("event") == "finish"}
-    states = []
-    for stage in STAGES:
-        if stage in done:
-            state = "done"
-        elif stage in started:
-            state = "stopped" if finished else "running"
-        else:
-            state = "pending"
-        states.append({"name": stage, "state": state})
-    return states
 
 
 @app.get("/")
@@ -345,16 +291,11 @@ def get_web_run(run_id: str) -> Response:
             "stages": stage_states(events, finished),
             "calls": calls[-6:],
             "patch": services.store.patch(run_id),
-            "merge_request": published_merge_request(run_id),
+            "merge_request": published_merge_request(run_id, services.store),
         }
     )
 
 
-def published_merge_request(run_id: str) -> str | None:
-    folder = services.store.folder(run_id)
-    if folder is None or not (folder / MERGE_REQUEST_FILE).is_file():
-        return None
-    return (folder / MERGE_REQUEST_FILE).read_text(encoding="utf-8")
 
 
 @app.post("/web/runs/<run_id>/publish")
