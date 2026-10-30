@@ -27,3 +27,11 @@ def test_no_expected_sha_cannot_be_verified():
 def test_signature_is_stable_and_ignores_allowed_failure():
     jobs = [{'id': 13, 'name': 'lint'}, {'id': 11, 'name': 'test'}, {'name': 'optional', 'allow_failure': True}]
     assert failed_job_signature(jobs) == ('lint', 'test')
+
+
+def test_signature_ignores_new_job_ids_and_runner_formatting():
+    first_jobs = [{"id": 1, "name": "tests", "failure_reason": "script_failure"}]
+    next_jobs = [{"id": 2, "name": "tests", "failure_reason": "script_failure"}]
+    first_trace = "section_start:100:test\r\x1b[0K\x1b[31mAssertionError: expected 2\x1b[0m\r\n"
+    next_trace = "section_start:200:test\r\x1b[0KAssertionError: expected 2\n"
+    assert failed_job_signature(first_jobs, {1: first_trace}) == failed_job_signature(next_jobs, {2: next_trace})

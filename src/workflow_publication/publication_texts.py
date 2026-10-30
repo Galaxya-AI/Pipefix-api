@@ -12,9 +12,10 @@ from workflow_remediation.round_result import RoundResult
 FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
 
 
-def fix_branch_name(pipeline_id: int) -> str:
+def fix_branch_name(pipeline_id: int, run_id: str | None = None) -> str:
     """Return e.g. "auto-fix/pipeline-42"."""
-    return f"{FIX_BRANCH_PREFIX}pipeline-{pipeline_id}"
+    suffix = f"-{run_id}" if run_id else ""
+    return f"{FIX_BRANCH_PREFIX}pipeline-{pipeline_id}{suffix}"
 
 
 def retry_branch_name(pipeline_id: int, run_id: str) -> str:

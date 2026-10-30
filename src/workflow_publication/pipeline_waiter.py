@@ -40,7 +40,11 @@ class PipelineWaiter:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             pipelines = self.platform.list_pipelines(project, ref=branch, sha=sha, per_page=1)
-            if pipelines and pipelines[0].get("status") in FINAL_STATUSES:
+            if (
+                pipelines
+                and str(pipelines[0].get("sha", "")) == sha
+                and pipelines[0].get("status") in FINAL_STATUSES
+            ):
                 details = {"id": pipelines[0].get("id"), "status": pipelines[0].get("status")}
                 self.journal.log("pipeline_waiter", "pipeline_finished", details)
                 return pipelines[0]

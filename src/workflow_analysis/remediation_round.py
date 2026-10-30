@@ -35,6 +35,7 @@ AUTO_RETRY_FLAKY = os.getenv("AUTO_RETRY_FLAKY", "false").strip().lower() in ("1
 
 # Log lines of the first failed job given to every agent
 CONTEXT_LOG_LINES = int(os.getenv("CONTEXT_LOG_LINES", "150"))
+MAX_CONTEXT_JOBS = max(1, int(os.getenv("MAX_CONTEXT_JOBS", "5")))
 
 
 class RemediationRound:
@@ -81,8 +82,11 @@ class RemediationRound:
         self.runner.tools = build_run_registry(
             self.tools, project, sha, changeset, self.policy, self.journal, allow_research
         )
-        first_log = clean_log(self.platform.job_trace(project, int(jobs[0]["id"])), CONTEXT_LOG_LINES)
-        context = pipeline_context(project, pipeline, jobs, first_log)
+        logs = []
+        for job in jobs[:MAX_CONTEXT_JOBS]:
+            excerpt = clean_log(self.platform.job_trace(project, int(job["id"])), CONTEXT_LOG_LINES)
+            logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
+        context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
         if not self.analyse(project, context, result):
             return result
         self.fix_and_review(context, changeset, result)
