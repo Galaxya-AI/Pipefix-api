@@ -35,7 +35,6 @@ from connectors.errors.errors import ConnectorError
 from connectors.gitlab.client import GitLabClient
 from journal.run_journal import RunJournal
 from startup.services import build_api_services, build_user_run_function
-from workflow_publication.publisher import publish_saved_fix
 from web_support import (
     access_owner,
     parse_project_url,
@@ -44,6 +43,7 @@ from web_support import (
     web_owner,
     web_owners,
 )
+from workflow_publication.publisher import publish_saved_fix
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
@@ -214,16 +214,6 @@ def gitlab_webhook() -> tuple[Response, int]:
     return jsonify({"status": "started", "run_id": run_id}), 202
 
 
-
-
-
-
-
-
-
-
-
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
@@ -251,10 +241,11 @@ def create_web_run() -> tuple[Response, int]:
         gitlab_url, project, pipeline_in_url = parse_project_url(address)
     except ValueError as error:
         abort(400, description=str(error))
-    pipeline_id = read_pipeline_number(body.get("pipeline_id")) or pipeline_in_url
-    gitlab = GitLabClient(gitlab_url, gitlab_token)
+    pipeline_id = body.get("pipeline_id") or pipeline_in_url
+    if pipeline_id is not None and (not isinstance(pipeline_id, int) or pipeline_id < 1):
+        abort(400, description="The pipeline number must be a positive number.")
     try:
-        gitlab.get_project(project)
+        GitLabClient(gitlab_url, gitlab_token).get_project(project)
     except ConnectorError as error:
         if gitlab_token:
             abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
@@ -263,8 +254,6 @@ def create_web_run() -> tuple[Response, int]:
             description="This project cannot be read without a token: it is private or does not exist. "
             "Add an access token with the read_api scope.",
         )
-    if pipeline_id is not None:
-        check_pipeline_to_fix(gitlab, project, pipeline_id)
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     run_key = secrets.token_urlsafe(32)
@@ -276,79 +265,25 @@ def create_web_run() -> tuple[Response, int]:
 
 @app.get("/web/runs/<run_id>")
 def get_web_run(run_id: str) -> Response:
-    """Status (then the shown part of the report), state of each agent and patch of a web run."""
+    """Status (then report), state of each agent, last tool calls and patch of a web run."""
     web_owner(run_id)
     run = services.store.get_run(run_id)
     finished = run is not None and run.get("status") not in ("queued", "running")
     events = services.store.events(run_id) or []
+    calls = [
+        {"agent": event.get("actor"), "tool": (event.get("data") or {}).get("tool")}
+        for event in events
+        if event.get("event") == "tool_call"
+    ]
     return jsonify(
         {
-            "run": public_run(run),
+            "run": run,
             "stages": stage_states(events, finished),
+            "calls": calls[-6:],
             "patch": services.store.patch(run_id),
             "merge_request": published_merge_request(run_id, services.store),
         }
     )
-
-
-<<<<<<< HEAD
-def read_pipeline_number(value: Any) -> int | None:
-    """Return the pipeline number typed in the form ("3005959635" or "#3005959635"), None when empty.
-
-    Anything else is refused: a number typed wrongly must never fall back to the latest failed pipeline.
-    """
-    if value is None or value == "":
-        return None
-    text = str(value).strip().lstrip("#").strip()
-    if not text.isdigit() or int(text) < 1:
-        abort(400, description="The pipeline number must be a number, for example 2978771 or #2978771.")
-    return int(text)
-
-
-def check_pipeline_to_fix(gitlab: GitLabClient, project: str, pipeline_id: int) -> None:
-    """Answer at once, before any agent runs, when the pipeline is missing or has nothing to fix."""
-    try:
-        pipeline = gitlab.get_pipeline(project, pipeline_id)
-    except ConnectorError as error:
-        if error.status_code == 404:
-            abort(400, description=f"Pipeline #{pipeline_id} does not exist in the project {project}.")
-        raise
-    status = str(pipeline.get("status", ""))
-    if status == "success":
-        abort(400, description=f"Pipeline #{pipeline_id} passed: there is nothing to fix.")
-    if status in ("created", "pending", "running", "waiting_for_resource", "preparing", "scheduled"):
-        abort(400, description=f"Pipeline #{pipeline_id} is still running: try again once it has failed.")
-    if status != "failed":
-        abort(400, description=f"Pipeline #{pipeline_id} did not fail (status: {status}): there is nothing to fix.")
-
-
-def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
-    if run is None:
-        return None
-    last = (run.get("rounds") or [{}])[-1] or {}
-    shown = {
-        "diagnosis": {
-            "root_cause": (last.get("diagnosis") or {}).get("root_cause"),
-            "introduced_by": (last.get("diagnosis") or {}).get("introduced_by"),
-        },
-        "fix": {"summary": (last.get("fix") or {}).get("summary")},
-        "review": {"comment": (last.get("review") or {}).get("comment")},
-        # An agent that could not finish: the reason is for the developers' logs, not for the visitor.
-        "error": None if str(run.get("status", "")).endswith("_failed") else last.get("error"),
-    }
-    view = {key: run.get(key) for key in ("status", "project", "error", "merge_request_url") if run.get(key)}
-    view["rounds"] = [shown] if run.get("rounds") else []
-    return view
-
-
-def published_merge_request(run_id: str) -> str | None:
-    folder = services.store.folder(run_id)
-    if folder is None or not (folder / MERGE_REQUEST_FILE).is_file():
-        return None
-    return (folder / MERGE_REQUEST_FILE).read_text(encoding="utf-8")
-=======
->>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
 
 
 @app.post("/web/runs/<run_id>/publish")
