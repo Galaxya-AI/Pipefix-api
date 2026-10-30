@@ -24,7 +24,6 @@ from journal.run_journal import RunJournal
 from llm.base import LLMClient
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
-from text_tools.log_cleaning import failure_fingerprint
 from tools.registry import ToolRegistry
 from tools.tool import Tool
 from workflow_analysis.pipeline_selection import find_pipeline, refusal_status
@@ -154,24 +153,21 @@ class RemediationWorkflow:
         Every wait is pinned to the SHA returned by GitLab, not just the branch.
         """
         current = pipeline
-        branch = fix_branch_name(int(pipeline["id"]), self.journal.run_id)
+        branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"]), self.journal.run_id))
         seen_failures: set[tuple[str, ...]] = set()
         last_result: RoundResult | None = None
         for round_number in range(1, self.max_rounds + 1):
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             if self.wait_for_pipeline and not self.dry_run:
                 failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
-                # The error lines, without durations or ids: two runs of the same error match,
-                # a new error hidden by the previous one does not.
-                signature = tuple(
-                    sorted(
-                        f"{job.get('name', '')}:{job.get('failure_reason', '')}:"
-                        f"{failure_fingerprint(self.platform.job_trace(project, int(job['id'])))}"
-                        for job in failing_jobs
-                    )
-                )
+                traces = {
+                    int(job["id"]): self.platform.job_trace(project, int(job["id"]))
+                    for job in failing_jobs
+                    if not job.get("allow_failure")
+                }
+                signature = failed_job_signature(failing_jobs, traces)
                 if signature and signature in seen_failures:
-                    report["error"] = "The same failed jobs were observed again; manual review required."
+                    report["error"] = "The same job failures were observed again; manual review required."
                     return "repeated_failure"
                 if signature:
                     seen_failures.add(signature)
@@ -181,7 +177,11 @@ class RemediationWorkflow:
                 return result.status
             if self.dry_run:
                 report["patch_file"] = str(self.journal.write_text("fix.patch", result.diff))
-                self.journal.write_text(SAVED_FIX_FILE, json.dumps({"pipeline": pipeline, "files": result.files}))
+                report["validation"] = {"verified": False, "reason": "dry_run"}
+                self.journal.write_text(
+                    SAVED_FIX_FILE,
+                    json.dumps({"pipeline": pipeline, "files": result.files, "branch": branch}),
+                )
                 return "dry_run_patch_ready"
 
             # Fixes in later rounds are applied to the SAME working branch.
@@ -190,34 +190,36 @@ class RemediationWorkflow:
             commit = self.commit_fix(project, pipeline, branch, result)
             sha = str(commit.get("id", ""))
             report["fix_branch"] = branch
-            report.setdefault("validation", []).append({"round": round_number, "commit_sha": sha})
+            report.setdefault("validations", []).append({"round": round_number, "commit_sha": sha})
             if not self.wait_for_pipeline:
+                report["validation"] = {"verified": False, "reason": "not_requested"}
                 self.open_fix_mr(project, pipeline, branch, result, report)
                 return "merge_request_opened"
             if not sha:
                 report["error"] = "GitLab did not return a commit SHA; cannot verify the pipeline."
                 return "validation_unavailable"
             finished = self.waiter.wait(project, branch, sha, self.pipeline_timeout_s)
-            validation = report["validation"][-1]
-            validation["pipeline_id"] = finished.get("id") if finished else None
-            validation["status"] = finished.get("status") if finished else "timeout"
-            if finished is not None and str(finished.get("sha", "")) != sha:
+            validation = validation_record(finished, sha)
+            report["validations"][-1].update(validation)
+            report["validation"] = validation
+            if finished is None:
+                return "pipeline_timeout"
+            if str(finished.get("sha", "")) != sha:
                 report["error"] = "Pipeline SHA does not match the proposed fix commit."
-                return "validation_sha_mismatch"
+                return "pipeline_sha_mismatch"
             status = outcome_status(finished)
             if status == "pipeline_fixed":
                 self.open_fix_mr(project, pipeline, branch, last_result, report)
                 return "pipeline_fixed"
-            if status is not None or finished is None:
-                return status or "pipeline_timeout"
+            if status is not None:
+                return status
             # The next round reads files at this fix-branch pipeline's commit.
             current = finished
+        report["validation"] = {"verified": False, "reason": "max_rounds_reached"}
         report["error"] = "The iteration limit was reached; no MR was opened without passing CI."
         return "max_rounds_reached"
 
-    def commit_fix(
-        self, project: str, pipeline: dict[str, Any], branch: str, result: RoundResult
-    ) -> dict[str, Any]:
+    def commit_fix(self, project: str, pipeline: dict[str, Any], branch: str, result: RoundResult) -> dict[str, Any]:
         """Commit on the isolated work branch, never directly on the target.
 
         The first commit also creates the branch from the analysed commit, in one call:

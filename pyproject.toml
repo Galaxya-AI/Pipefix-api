@@ -14,7 +14,6 @@ dependencies = [
     "gunicorn>=23",
     "redis>=5",
     "rq>=2",
-    "sentry-sdk[flask]>=2,<3",
 ]
 
 [project.optional-dependencies]

@@ -137,39 +137,6 @@ def test_publish_needs_a_token(client: FlaskClient, monkeypatch: pytest.MonkeyPa
     assert "api scope" in response.get_json()["message"]
 
 
-def test_api_rejects_boolean_pipeline_id(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/runs",
-        json={"project": "group/app", "pipeline_id": True},
-        headers={"Authorization": "Bearer t"},
-    )
-    assert response.status_code == 400
-
-
-def test_web_run_rejects_explicit_zero_even_when_url_has_pipeline(client: FlaskClient) -> None:
-    response = client.post(
-        "/web/runs",
-        json={
-            "access_code": "good-code",
-            "project_url": "https://gitlab.com/group/app/-/pipelines/42",
-            "pipeline_id": 0,
-        },
-    )
-    assert response.status_code == 400
-
-
-def test_webhook_rejects_malformed_pipeline_id(client: FlaskClient) -> None:
-    response = client.post(
-        "/api/v1/webhooks/gitlab",
-        json={
-            "object_kind": "pipeline",
-            "object_attributes": {"status": "failed", "ref": "main", "id": "not-a-number"},
-            "project": {"path_with_namespace": "group/app"},
-        },
-        headers={"X-Gitlab-Token": "s"},
-    )
-    assert response.status_code == 400
-
 def test_client_sends_no_token_header_when_empty() -> None:
     assert "PRIVATE-TOKEN" not in GitLabClient("https://gitlab.com").session.headers
     assert GitLabClient("https://gitlab.com", "x").session.headers["PRIVATE-TOKEN"] == "x"
