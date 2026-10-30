@@ -93,7 +93,16 @@ class AgentRunner:
         try:
             response = self.llm.chat(agent.llm_provider, agent.llm_model, messages, definitions)
         except LLMError as error:
-            self.log(agent.agent_name, "llm_error", {"error": str(error)})
+            self.log(
+                agent.agent_name,
+                "llm_error",
+                {
+                    "provider": agent.llm_provider,
+                    "model": agent.llm_model,
+                    "type": type(error).__name__,
+                    "error": str(error),
+                },
+            )
             raise AgentRunError(f"LLM call failed for agent '{agent.agent_name}': {error}") from error
         self.usage.add(agent.agent_name, response)
         if response.content:

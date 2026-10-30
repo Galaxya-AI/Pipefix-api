@@ -50,7 +50,7 @@
   .quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
   button:disabled { opacity: .55; cursor: default; }
   form .primary { width: 100%; margin-top: 22px; }
-  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; }
+  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
   .run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .run-head { padding: 20px 24px 18px; border-bottom: 1px solid var(--line); }
@@ -75,19 +75,25 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .running .node::after { animation: none; } }
 
-  .calls { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
-  .calls li { padding: 2px 0; }
 
   .body { padding: 22px 24px 24px; }
   .empty { color: var(--muted); margin: 0; }
   .verdict { display: flex; gap: 10px; align-items: baseline; margin: 0 0 16px; font-weight: 600; font-size: 17px; }
   .verdict .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; transform: translateY(-1px); }
   .ok .dot { background: var(--pass); } .warn .dot { background: var(--run); } .bad .dot { background: var(--fail); }
-  dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px 16px; margin: 0 0 20px; }
-  dt { color: var(--muted); } dd { margin: 0; }
+  dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; margin: 0 0 20px; }
+  /* Long errors (an API answer, a URL, a key mask) wrap inside the frame instead of being cut. */
+  dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
+  /* One frame per changed file, like the Changes tab of a GitLab merge request; a click on the name folds it. */
+  .files-summary { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
   .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .file-name { padding: 8px 12px; background: var(--code); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .file + .file { margin-top: 10px; }
+  .file-name { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; background: var(--code);
+               font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+  .file[open] .file-name { border-bottom: 1px solid var(--line); }
+  .file-name .path { flex: 1; min-width: 0; }
+  .file-name .count-add { color: var(--pass); } .file-name .count-del { color: var(--fail); }
   pre.diff { margin: 0; padding: 8px 0; overflow-x: auto; font-size: 13px; line-height: 1.6; background: var(--surface); }
   pre.diff span { display: block; padding: 0 12px; white-space: pre; }
   .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
@@ -152,7 +158,6 @@
       <h2 id="run-title">No analysis yet</h2>
       <span class="mono" id="run-id"></span>
       <ol class="track" id="track"></ol>
-      <ul class="calls" id="calls"></ul>
     </div>
     <div class="body">
       <p class="empty" id="empty">Four agents look at the failure in turn: triage sorts it, diagnosis finds the cause,
@@ -160,8 +165,11 @@
       <div id="result" hidden>
         <p class="verdict" id="verdict"><span class="dot"></span><span id="verdict-text"></span></p>
         <dl id="details"></dl>
+        <p class="published" id="existing" hidden>Merge or close it before asking for a new fix:
+          <a id="existing-link" target="_blank" rel="noopener"></a></p>
         <div id="changes" hidden>
-          <div class="file"><div class="file-name mono" id="file-name"></div><pre class="diff" id="diff"></pre></div>
+          <p class="files-summary" id="files-summary"></p>
+          <div id="files"></div>
           <div class="actions">
             <button class="primary" id="publish" type="button">Create merge request</button>
             <button class="quiet" id="download" type="button">Download patch</button>
@@ -190,10 +198,12 @@ const ICONS = {
 };
 const VERDICTS = {
   dry_run_patch_ready: ["A fix is ready", "ok"],
+  fix_already_proposed: ["A fix for this pipeline is already waiting in a merge request", "ok"],
   not_fixable_by_code: ["Not caused by the code: check the environment or the CI configuration", "warn"],
   infra_flaky: ["Looks temporary: retry the pipeline", "warn"],
   review_rejected: ["The reviewer rejected the proposed fix", "warn"],
-  no_failed_pipeline: ["No failed pipeline found in this project", "warn"],
+  no_failed_pipeline: ["Nothing to fix: no failed pipeline, or the latest pipelines of each branch passed", "ok"],
+  pipeline_success: ["This pipeline passed: there is nothing to fix", "ok"],
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],
   error: ["The analysis stopped with an error", "bad"],
 };
@@ -210,9 +220,11 @@ $("form").addEventListener("submit", async (event) => {
     project_url: $("project").value.trim(),
     gitlab_token: token,
   };
+  // Sent as typed ("123" or "#123"): the server checks it and never falls back to another pipeline.
   const pipeline = $("pipeline").value.trim();
-  if (pipeline) body.pipeline_id = Number(pipeline);
+  if (pipeline) body.pipeline_id = pipeline;
   $("start").disabled = true;
+  pollFailures = 0;
   try {
     const answer = await send("/web/runs", body);
     runId = answer.run_id;
@@ -227,7 +239,30 @@ $("form").addEventListener("submit", async (event) => {
   }
 });
 
+// Network failures in a row tolerated while following a run (about 30 seconds) before giving up.
+const MAX_POLL_FAILURES = 12;
+let pollFailures = 0;
+
 async function poll() {
+<<<<<<< HEAD
+  let response, data;
+  try {
+    response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
+    if (response.ok) data = await response.json();
+  } catch (error) {
+    // Network cut or server restarting: try again instead of freezing the page.
+    pollFailures += 1;
+    if (pollFailures <= MAX_POLL_FAILURES) { setTimeout(poll, 2500); return; }
+    hide("empty");
+    show("form-error", "PipeFix does not answer any more. Reload the page and start the analysis again.");
+    $("start").disabled = false;
+    return;
+  }
+  pollFailures = 0;
+  if (!response.ok) {
+    hide("empty");
+    show("form-error", "This analysis is no longer available (PipeFix may have restarted). Start it again.");
+=======
   const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
   if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
   let data;
@@ -239,10 +274,8 @@ async function poll() {
     return;
   }
   drawTrack(data.stages);
-  $("calls").replaceChildren(...data.calls.map((call) => tag("li", `${call.agent} called ${call.tool}`)));
   const status = data.run ? data.run.status : "running";
   if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
-  $("calls").replaceChildren();
   hide("empty");
   $("run-title").textContent = `Analysis of ${data.run.project || ""}`;
   showResult(data.run, data.patch, data.merge_request);
@@ -262,27 +295,78 @@ function drawTrack(stages) {
 }
 
 function showResult(report, diff, mergeRequest) {
-  const [text, level] = VERDICTS[report.status] || [`Finished: ${report.status}`, "warn"];
+  const [text, level] = VERDICTS[report.status] || (String(report.status).endsWith("_failed")
+    ? ["The analysis could not finish. Try again, or give the number of the failed pipeline.", "warn"]
+    : [`Finished: ${report.status}`, "warn"]);
   $("verdict").className = `verdict ${level}`;
   $("verdict-text").textContent = text;
   const round = (report.rounds || []).at(-1) || {};
   const rows = [
     ["Cause", round.diagnosis && round.diagnosis.root_cause],
+    ["Commit", round.diagnosis && round.diagnosis.introduced_by && round.diagnosis.introduced_by.slice(0, 8)],
     ["Fix", round.fix && round.fix.summary],
     ["Review", round.review && round.review.comment],
     ["Error", report.error || round.error],
   ].filter(([, value]) => value);
+  $("existing").hidden = !report.merge_request_url;
+  if (report.merge_request_url) {
+    $("existing-link").href = report.merge_request_url;
+    $("existing-link").textContent = report.merge_request_url;
+  }
   $("details").replaceChildren(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
   patch = diff || "";
   $("changes").hidden = !patch;
   if (patch) {
-    const files = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
-    $("file-name").textContent = files.join(", ");
-    $("diff").replaceChildren(...patch.trimEnd().split("\n").filter((line) => !/^(---|\+\+\+) /.test(line)).map(diffLine));
+    const files = splitPatch(patch);
+    $("files-summary").textContent = files.length === 1 ? "1 file changed" : `${files.length} files changed`;
+    $("files").replaceChildren(...files.map(fileBlock));
   }
   $("publish").disabled = false;
   if (mergeRequest) showPublished(mergeRequest);
   show("result");
+}
+
+// Split a unified patch into one entry per file: { path, lines }, without the file header lines.
+// A file starts at a "--- " line directly followed by "+++ ": a removed line that starts with "--" stays code.
+function splitPatch(text) {
+  const lines = text.trimEnd().split("\n");
+  const files = [];
+  let current = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.startsWith("--- ") && (lines[index + 1] || "").startsWith("+++ ")) {
+      current = { path: lines[index + 1].slice(4).replace(/^b\//, ""), lines: [] };
+      files.push(current);
+      index += 1;
+      continue;
+    }
+    if (/^(diff --git |index |new file mode|deleted file mode)/.test(line)) continue;
+    if (!current) { current = { path: "", lines: [] }; files.push(current); }
+    current.lines.push(line);
+  }
+  return files.filter((file) => file.lines.length);
+}
+
+function fileBlock(file) {
+  const block = document.createElement("details");
+  block.className = "file";
+  block.open = true;
+  const added = file.lines.filter((line) => line.startsWith("+")).length;
+  const removed = file.lines.filter((line) => line.startsWith("-")).length;
+  const name = document.createElement("summary");
+  name.className = "file-name mono";
+  const path = tag("span", file.path || "(file)");
+  path.className = "path";
+  const plus = tag("span", `+${added}`);
+  plus.className = "count-add";
+  const minus = tag("span", `\u2212${removed}`);
+  minus.className = "count-del";
+  name.append(path, plus, minus);
+  const code = document.createElement("pre");
+  code.className = "diff";
+  code.replaceChildren(...file.lines.map(diffLine));
+  block.append(name, code);
+  return block;
 }
 
 function diffLine(line) {

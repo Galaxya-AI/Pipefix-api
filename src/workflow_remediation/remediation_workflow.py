@@ -31,8 +31,9 @@ from workflow_analysis.policy_check import STATUS_BLOCKED, check_project_policy
 from workflow_analysis.remediation_round import RemediationRound
 from workflow_publication.failure_notifier import FailureNotifier
 from workflow_publication.pipeline_waiter import PipelineWaiter, outcome_status
-from workflow_publication.publication_texts import fix_branch_name
+from workflow_publication.publication_texts import fix_branch_name, retry_branch_name
 from workflow_publication.publisher import SAVED_FIX_FILE, Publisher
+from workflow_publication.validation import failed_job_signature, validation_record
 from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
 
@@ -124,6 +125,25 @@ class RemediationWorkflow:
         refusal: str | None = refusal_status(pipeline)
         if refusal is not None:
             return refusal
+        original_branch = fix_branch_name(int(pipeline["id"]))
+        existing = self.platform.find_merge_request(project, original_branch)
+        branch = (
+            retry_branch_name(int(pipeline["id"]), self.journal.run_id)
+            if existing
+            else fix_branch_name(int(pipeline["id"]), self.journal.run_id)
+        )
+        report["fix_branch"] = branch
+        if existing:
+            report["previous_merge_request_url"] = existing.get("web_url")
+            report["warning"] = (
+                "A previous fix is still open; this analysis is independent. "
+                "Review both proposals and avoid merging conflicting changes."
+            )
+            self.journal.log(
+                "workflow",
+                "previous_fix_open",
+                {"url": existing.get("web_url"), "new_branch": branch},
+            )
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
     def run_rounds(self, project: str, pipeline: dict[str, Any], allow_research: bool, report: dict[str, Any]) -> str:

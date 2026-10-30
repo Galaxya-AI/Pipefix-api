@@ -27,6 +27,18 @@ import secrets
 from typing import Any
 
 from flask import Flask, Response, abort, jsonify, render_template, request
+from web_support import (
+    access_owner,
+    check_pipeline_to_fix,
+    parse_project_url,
+    public_run,
+    published_merge_request,
+    read_pipeline_number,
+    secret_hash,
+    stage_states,
+    web_owner,
+    web_owners,
+)
 from werkzeug.exceptions import HTTPException
 
 from app_runs.launcher import LaunchError
@@ -263,7 +275,7 @@ def create_web_run() -> tuple[Response, int]:
     ):
         abort(400, description="The pipeline number must be a positive number.")
     try:
-        GitLabClient(gitlab_url, gitlab_token).get_project(project)
+        gitlab.get_project(project)
     except ConnectorError as error:
         if gitlab_token:
             abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
@@ -272,6 +284,8 @@ def create_web_run() -> tuple[Response, int]:
             description="This project cannot be read without a token: it is private or does not exist. "
             "Add an access token with the read_api scope.",
         )
+    if pipeline_id is not None:
+        check_pipeline_to_fix(gitlab, project, pipeline_id)
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     run_key = secrets.token_urlsafe(32)
@@ -288,16 +302,10 @@ def get_web_run(run_id: str) -> Response:
     run = services.store.get_run(run_id)
     finished = run is not None and run.get("status") not in ("queued", "running")
     events = services.store.events(run_id) or []
-    calls = [
-        {"agent": event.get("actor"), "tool": (event.get("data") or {}).get("tool")}
-        for event in events
-        if event.get("event") == "tool_call"
-    ]
     return jsonify(
         {
-            "run": run,
+            "run": public_run(run),
             "stages": stage_states(events, finished),
-            "calls": calls[-6:],
             "patch": services.store.patch(run_id),
             "merge_request": published_merge_request(run_id, services.store),
         }

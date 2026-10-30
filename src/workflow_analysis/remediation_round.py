@@ -139,6 +139,8 @@ class RemediationRound:
         except AgentRunError as error:
             result.status = f"{agent_name}_failed"
             result.error = str(error)
+            # For the developers: the page only says that the analysis could not finish.
+            self.journal.log(agent_name, "agent_failed", {"error": str(error)})
             return None
 
     def handle_flaky(self, project: str, triage: AgentOutput) -> str:

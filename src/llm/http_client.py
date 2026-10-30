@@ -37,8 +37,14 @@ def post_json(
     """
     try:
         response = session.post(url, headers=headers, json=payload, timeout=timeout_s)
+    except requests.exceptions.InvalidHeader:
+        # The message of this error holds the header value, that is the API key: never logged.
+        raise LLMError(
+            f"Invalid request header towards {url}: the API key contains a space, a line break "
+            "or another forbidden character. Check the value of the key (e.g. OPENAI_API_KEY)."
+        ) from None
     except requests.RequestException as error:
-        raise LLMTransientError(f"Network error towards {url}: {error}") from error
+        raise LLMTransientError(f"Network error towards {url}: {type(error).__name__}: {error}") from error
     if response.status_code in RETRY_STATUSES:
         raise LLMTransientError(
             f"Temporary LLM API error {response.status_code}: {response.text[:300]}",

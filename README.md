@@ -1,12 +1,25 @@
 # Multi-agent system for failed GitLab pipelines
 
 When a GitLab CI pipeline fails, this service finds the cause and proposes a fix.
-Five agents work in a fixed order: triage, diagnosis (with web research when the
+Agents work in a fixed order: triage, diagnosis (with web research when the
 error is unknown), fixer and reviewer. A fix is only proposed once the reviewer
 approves it, and it is published as a draft merge request, so a human always
 decides before merging.
 
-This is a proof of concept: one pipeline is analysed at a time.
+This is a proof of concept: one pipeline is analysed at a time. A single
+proposal is **not** proof that the pipeline has passed. Further failing pipelines
+can be analysed independently. If a draft MR remains open for the *same*
+pipeline, a new run still performs diagnosis; its fix uses an isolated branch
+(`auto-fix/pipeline-<id>-retry-<run_id>`) so it does not overwrite the pending MR.
+Both proposals require human review. Closed MRs are not treated as successful fixes.
+
+**Important limitation:** no automatic merge or guarantee of a green pipeline.
+When `WAIT_FOR_PIPELINE=false`, PipeFix proposes a draft MR but does not verify
+that merging it will make the target pipeline pass. When enabled, the optional
+pipeline wait/round loop applies only to the fix branch and respects `MAX_ROUNDS`.
+If the failure comes from additional tests, run PipeFix on the newer failed
+pipeline after updating the target branch; avoid merging incompatible fixes.
+
 
 ## Run
 

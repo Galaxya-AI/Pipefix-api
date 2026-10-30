@@ -29,7 +29,8 @@ class OpenAIProvider(LLMProvider):
         timeout_s: int = 180,
     ) -> None:
         super().__init__(name)
-        self.api_key = api_key
+        # A key copied with a space or a line break around it would make every request fail.
+        self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
         self.include_tool_name = include_tool_name
         self.timeout_s = timeout_s

@@ -92,7 +92,7 @@ def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[
     project = str(report["project"])
     target_branch = str(pipeline.get("ref", ""))
     analysed_sha = str(pipeline.get("sha", ""))
-    branch = fix_branch_name(result.pipeline_id)
+    branch = str(saved.get("branch") or fix_branch_name(result.pipeline_id))
     publisher = Publisher(platform, journal)
     if not platform.branch_exists(project, branch):
         publisher.create_branch(project, branch, analysed_sha)
