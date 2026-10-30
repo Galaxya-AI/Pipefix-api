@@ -1,12 +1,25 @@
 # Multi-agent system for failed GitLab pipelines
 
 When a GitLab CI pipeline fails, this service finds the cause and proposes a fix.
-Five agents work in a fixed order: triage, diagnosis (with web research when the
+Agents work in a fixed order: triage, diagnosis (with web research when the
 error is unknown), fixer and reviewer. A fix is only proposed once the reviewer
 approves it, and it is published as a draft merge request, so a human always
 decides before merging.
 
-This is a proof of concept: one pipeline is analysed at a time.
+This is a proof of concept: one pipeline is analysed at a time. A single
+proposal is **not** proof that the pipeline has passed. Further failing pipelines
+can be analysed independently. If a draft MR remains open for the *same*
+pipeline, a new run still performs diagnosis; its fix uses an isolated branch
+(`auto-fix/pipeline-<id>-retry-<run_id>`) so it does not overwrite the pending MR.
+Both proposals require human review. Closed MRs are not treated as successful fixes.
+
+**Important limitation:** no automatic merge or guarantee of a green pipeline.
+When `WAIT_FOR_PIPELINE=false`, PipeFix proposes a draft MR but does not verify
+that merging it will make the target pipeline pass. When enabled, the optional
+pipeline wait/round loop applies only to the fix branch and respects `MAX_ROUNDS`.
+If the failure comes from additional tests, run PipeFix on the newer failed
+pipeline after updating the target branch; avoid merging incompatible fixes.
+
 
 ## Run
 
@@ -59,3 +72,75 @@ curl -X POST localhost:8000/api/v1/runs \
 curl localhost:8000/api/v1/runs/20261026-175201-a3f2c1/patch -H "Authorization: Bearer $API_TOKEN"
 ```
 
+
+## Diagnosing repeated CI failures
+
+1. Check the failed pipeline ID and commit (`sha`) in GitLab. After an import fix,
+   a **new** failed pipeline may expose previously hidden unit-test failures.
+2. Analyse that new pipeline ID in PipeFix. A pending MR for an older pipeline
+   is not evidence that the new failure was fixed.
+3. If analysing the *same* ID again while an MR remains open, the report provides
+   `previous_merge_request_url`, `fix_branch` and a warning. A new proposal is
+   isolated from the previous one; compare both before merging either.
+4. Download the proposed patch, inspect tests and CI logs, and create a draft MR
+   only if you approve. Run GitLab CI again after merging; repeat on the next
+   genuinely failed pipeline if necessary.
+
+To prevent accidental recursive analysis, pipelines on the `auto-fix/` branch
+prefix are excluded from automatic target selection. This is not a fully
+self-healing loop and does not automatically resolve all errors in one pass.
+
+## Changes in this update
+
+- `src/workflow_remediation/remediation_workflow.py`: replaces the old
+  `fix_already_proposed` early exit with independent reanalysis, pending-MR
+  warnings, and tracking of the selected fix branch.
+- `src/workflow_publication/publication_texts.py`: adds safe retry branch naming.
+- `src/workflow_publication/publisher.py`: publishes a previously approved dry-run
+  patch to the recorded independent branch rather than overwriting the old one.
+- `tests/test_existing_merge_request.py`: adds regression coverage for pending
+  MRs and standard first-time analysis.
+- `templates/index.html`: shows the pending previous MR and a warning while allowing a new analysis.
+- `README.md`: documents usage, limitations, repeat failures and the changed files.
+
+## CI validation and iterative correction (safety contract)
+
+This release adds CI verification metadata and repeated-failure detection:
+
+- `validation.verified` is **true only** if GitLab reports `success` for the exact
+  SHA written by PipeFix. A successful pipeline for another commit does not count.
+- `validation.reason` reports `not_requested`, `dry_run`, `failed`,
+  `pipeline_timeout`, `sha_mismatch`, or `success` where applicable.
+- With `WAIT_FOR_PIPELINE=true`, the workflow can retry on a failed fix pipeline
+  up to `MAX_ROUNDS`. If the same mandatory jobs fail again, it stops with
+  `repeated_failure` and asks for human review instead of looping blindly.
+- Published merge requests remain **drafts**. They are never automatically merged.
+- Do **not** claim a fix is verified merely because a draft MR was opened.
+
+Suggested configuration for controlled GitLab testing (use in a test project first):
+
+```dotenv
+DRY_RUN=false
+WAIT_FOR_PIPELINE=true
+MAX_ROUNDS=3
+PIPELINE_TIMEOUT_S=1800
+```
+
+**Operational caveats:** `DRY_RUN=false` creates branches, commits and draft merge
+requests. GitLab CI must be enabled for the fix branches, and the access token
+must have the required permissions. GitLab pipeline jobs are the source of truth
+for regression coverage: ensure `.gitlab-ci.yml` runs all existing tests rather
+than only the test related to the proposed patch. MR pipelines and target branch
+pipelines may differ. A green fix-branch pipeline does not prove the target
+branch will remain green after merge. Review concurrent MRs and rebases manually.
+An external GitLab/OpenShift end-to-end run is still required before production.
+
+### Files changed in this release
+
+- `src/workflow_remediation/remediation_workflow.py`: tracked CI outcomes, exact
+  commit validation, repeated failed-job detection, and bounded retries.
+- `src/workflow_publication/validation.py`: new pure validation and failure
+  signature helpers.
+- `tests/test_validation_policy.py`: tests for success, timeout, SHA mismatch,
+  failed CI, and recurring failure signatures.
+- `README.md`: documents configuration, behavior, and remaining limitations.
