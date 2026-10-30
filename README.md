@@ -73,146 +73,66 @@ curl localhost:8000/api/v1/runs/20261026-175201-a3f2c1/patch -H "Authorization: 
 ```
 
 
-<<<<<<< HEAD
-## Diagnosing repeated CI failures
+## Fix until the pipeline passes
 
-1. Check the failed pipeline ID and commit (`sha`) in GitLab. After an import fix,
-   a **new** failed pipeline may expose previously hidden unit-test failures.
-2. Analyse that new pipeline ID in PipeFix. A pending MR for an older pipeline
-   is not evidence that the new failure was fixed.
-3. If analysing the *same* ID again while an MR remains open, the report provides
-   `previous_merge_request_url`, `fix_branch` and a warning. A new proposal is
-   isolated from the previous one; compare both before merging either.
-4. Download the proposed patch, inspect tests and CI logs, and create a draft MR
-   only if you approve. Run GitLab CI again after merging; repeat on the next
-   genuinely failed pipeline if necessary.
+A failed pipeline often hides errors: an import error stops pytest before any test
+runs, a failed job skips the next stages. PipeFix handles this in rounds on one
+`auto-fix/` branch:
 
-To prevent accidental recursive analysis, pipelines on the `auto-fix/` branch
-prefix are excluded from automatic target selection. This is not a fully
-self-healing loop and does not automatically resolve all errors in one pass.
+1. the agents fix every error visible in the logs of the failed jobs;
+2. the fix is committed (the first commit also creates the branch, so GitLab does
+   not run a useless pipeline on the unchanged code);
+3. PipeFix waits for GitLab CI on that exact commit;
+4. red pipeline: the new errors start the next round; green pipeline: one **draft**
+   merge request opens. It is never merged automatically.
 
-## Changes in this update
+The run stops without a merge request on `max_rounds_reached`, `repeated_failure`
+(the same error lines came back), `pipeline_timeout` or a SHA mismatch; the fixes
+already made stay on the branch.
 
-- `src/workflow_remediation/remediation_workflow.py`: replaces the old
-  `fix_already_proposed` early exit with independent reanalysis, pending-MR
-  warnings, and tracking of the selected fix branch.
-- `src/workflow_publication/publication_texts.py`: adds safe retry branch naming.
-- `src/workflow_publication/publisher.py`: publishes a previously approved dry-run
-  patch to the recorded independent branch rather than overwriting the old one.
-- `tests/test_existing_merge_request.py`: adds regression coverage for pending
-  MRs and standard first-time analysis.
-- `templates/index.html`: shows the pending previous MR and a warning while allowing a new analysis.
-- `README.md`: documents usage, limitations, repeat failures and the changed files.
+**Web page.** After an analysis, *Fix until the pipeline passes* commits the fix the
+visitor saw, then runs the rounds; the page shows each round: the error lines of the
+failed jobs, the cause, the fix, the commit and the next pipeline. *Create merge request*
+still publishes the shown fix alone, without waiting for CI. Both need a token with
+the `api` scope, kept only while the run lasts.
 
-## CI validation and iterative correction (safety contract)
+**API.** `POST /api/v1/runs` with `"apply": true` runs the same rounds when
+`WAIT_FOR_PIPELINE=true`.
 
-This release adds CI verification metadata and repeated-failure detection:
-
-- `validation.verified` is **true only** if GitLab reports `success` for the exact
-  SHA written by PipeFix. A successful pipeline for another commit does not count.
-- `validation.reason` reports `not_requested`, `dry_run`, `failed`,
-  `pipeline_timeout`, `sha_mismatch`, or `success` where applicable.
-- With `WAIT_FOR_PIPELINE=true`, the workflow can retry on a failed fix pipeline
-  up to `MAX_ROUNDS`. If the same mandatory jobs fail again, it stops with
-  `repeated_failure` and asks for human review instead of looping blindly.
-- Published merge requests remain **drafts**. They are never automatically merged.
-- Do **not** claim a fix is verified merely because a draft MR was opened.
-
-Suggested configuration for controlled GitLab testing (use in a test project first):
-=======
-## Iterative remediation (opt-in)
-
-The default web flow is deliberately unchanged: `DRY_RUN=true` analyses a
-failed pipeline and offers a patch for human approval. It does not create
-branches, commits, or merge requests during analysis.
-
-For a **test GitLab project** you can enable end-to-end iteration in the worker:
->>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
+Settings (OpenShift: the `pipefix-env` secret, see `openshift/setup.env.example`):
 
 ```dotenv
-DRY_RUN=false
+MAX_ROUNDS=5
 WAIT_FOR_PIPELINE=true
-MAX_ROUNDS=3
-PIPELINE_TIMEOUT_S=1800
-<<<<<<< HEAD
-```
-
-**Operational caveats:** `DRY_RUN=false` creates branches, commits and draft merge
-requests. GitLab CI must be enabled for the fix branches, and the access token
-must have the required permissions. GitLab pipeline jobs are the source of truth
-for regression coverage: ensure `.gitlab-ci.yml` runs all existing tests rather
-than only the test related to the proposed patch. MR pipelines and target branch
-pipelines may differ. A green fix-branch pipeline does not prove the target
-branch will remain green after merge. Review concurrent MRs and rebases manually.
-An external GitLab/OpenShift end-to-end run is still required before production.
-
-### Files changed in this release
-
-- `src/workflow_remediation/remediation_workflow.py`: tracked CI outcomes, exact
-  commit validation, repeated failed-job detection, and bounded retries.
-- `src/workflow_publication/validation.py`: new pure validation and failure
-  signature helpers.
-- `tests/test_validation_policy.py`: tests for success, timeout, SHA mismatch,
-  failed CI, and recurring failure signatures.
-- `README.md`: documents configuration, behavior, and remaining limitations.
-=======
+PIPELINE_TIMEOUT_S=900
+AGENT_MAX_TURNS=30
+MAX_LLM_CALLS_PER_RUN=200
 MAX_CONTEXT_JOBS=5
 CONTEXT_LOG_LINES=150
 ```
 
-**This opt-in mode writes to GitLab.** It creates an isolated `auto-fix/`
-branch (unique to each PipeFix run), commits a reviewer-approved proposal,
-waits for GitLab CI to finish on that exact commit SHA, and if CI fails,
-passes the new failing jobs and bounded log excerpts to the agents for the
-next round. If CI succeeds, it opens **one draft merge request** for human
-review. It never merges automatically. If CI times out, repeats the same
-failure fingerprint or reaches the round limit, it stops **without opening
-a draft MR** and records the attempted commits in the run report.
+An empty value uses the default. To see every error in one pipeline, the CI of the
+analysed project should not stop at the first one, for example:
+`python -m pytest -rfE --continue-on-collection-errors` and a separate `ruff check` job
+in the same stage.
 
-All rounds on the branch are cumulative. Each pipeline must trigger for the
-`auto-fix/` branch and must run all required validation jobs; otherwise the
-run may time out or provide insufficient evidence. `pipeline_fixed` means
-that GitLab reported success for the latest proposed SHA, **not** a guarantee
-that every possible bug is fixed or that production deployment is safe.
-
-Each agent sees metadata for every failed job plus the bounded log excerpts
-of the first `MAX_CONTEXT_JOBS` failing jobs. Longer logs are truncated by
-`CONTEXT_LOG_LINES` per job, and only the jobs executed by GitLab are visible.
-The next round can discover failures hidden by earlier failures or stage
-conditions. The limit and reviewer are safety controls, not correctness
-proofs. Before production, test GitLab permissions, CI rules, timeouts,
-branch policies and OpenShift deployment separately.
+**Known limits:** CI rules must run the required jobs on `auto-fix/` branches; a pod
+restart stops a running loop (the commits already made stay on the branch);
+`pipeline_fixed` means GitLab reported success for the last commit, not that every bug
+is fixed. Review the full cumulative diff before merging.
 
 For verification in a development environment with dependencies installed:
 
 ```bash
 python -m compileall -q src app.py
 ruff check .
+mypy src app.py
 pytest -q
 ```
-
-**Known limits:** work can be blocked by CI rules that exclude auto-fix
-branches; no automatic merge; only single-run iteration (not persistent
-resumption after worker restart); a final global human review of the full
-cumulative diff is still recommended. Web-form analysis uses dry-run by
-default and manual publication of the saved patch does not perform the
-iterative validation loop.
-
-## Production readiness
-
-See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the mandatory CI, security, OpenShift, and rollback checks. This archive is a release candidate until the GitLab and OpenShift integration gates have passed.
-
 
 ### Structure des routes Flask
 
 `app.py` conserve la création de l'application, les hooks HTTP, les déclarations
 de routes et leurs gestionnaires Flask. Les fonctions auxiliaires indépendantes
-(access codes, parsing des URL GitLab, clés des runs, affichage des étapes et
-lecture du lien de MR) ont été déplacées dans `src/web_support.py`.
-
-Le lancement `gunicorn app:app` et les chemins d'API sont inchangés.
-Les tests de formulaire ont été ajustés pour injecter le chemin du Secret
-au niveau de son nouveau module. La réorganisation des gestionnaires de
-routes en contrôleurs totalement minces reste une étape distincte, à vérifier
-en intégration avec Flask avant déploiement.
->>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
+(access codes, parsing des URL GitLab, clés des runs, affichage des étapes et des
+tours, lecture du lien de MR) sont dans `src/web_support.py`.

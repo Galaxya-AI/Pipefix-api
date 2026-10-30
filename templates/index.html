@@ -99,6 +99,20 @@
   .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
 
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+  /* Rounds of "fix until the pipeline passes": errors of the pipeline, what was changed, the next pipeline. */
+  #loop-panel { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
+  #loop-panel h3 { margin: 0 0 6px; font-size: 16px; }
+  #loop-status { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .rounds { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  .round { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--surface); min-width: 0; }
+  .round h4 { margin: 0 0 10px; font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .badge { font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; }
+  .badge.pass { color: var(--pass); } .badge.fail { color: var(--fail); } .badge.run { color: var(--run); }
+  .round .job { margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+  .round .job a, .round dd a { color: var(--brand); }
+  pre.errors { margin: 0 0 10px; padding: 8px 10px; background: var(--code); border-radius: 6px; font-size: 12.5px;
+               line-height: 1.5; overflow-x: auto; white-space: pre; }
+  .round dl { margin: 6px 0 0; }
   .actions p { margin: 0; font-size: 13px; color: var(--muted); }
   .published { margin-top: 14px; font-size: 14px; }
   .published a { color: var(--brand); font-weight: 500; }
@@ -171,17 +185,25 @@
           <p class="files-summary" id="files-summary"></p>
           <div id="files"></div>
           <div class="actions">
-            <button class="primary" id="publish" type="button">Create merge request</button>
+            <button class="primary" id="loop" type="button">Fix until the pipeline passes</button>
+            <button class="quiet" id="publish" type="button">Create merge request</button>
             <button class="quiet" id="download" type="button">Download patch</button>
-            <p>The merge request is a draft: you review it before merging.</p>
+            <p>Fix until the pipeline passes: PipeFix commits this fix, waits for GitLab CI and fixes the new
+              errors, round after round; the draft merge request opens only when the pipeline is green.
+              Create merge request: this fix only, without waiting for the pipeline.</p>
           </div>
           <div id="publish-token-row" hidden>
             <label for="publish-token">Access token with the api scope
-              <span class="help">Needed to create the merge request. Used once, never stored.</span></label>
+              <span class="help">Needed to write to GitLab (merge request or fix rounds). Kept only while the run lasts, never stored.</span></label>
             <input id="publish-token" type="password" autocomplete="off">
           </div>
           <p class="error" id="publish-error" role="alert" hidden></p>
           <p class="published" id="published" hidden>Merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
+        </div>
+        <div id="loop-panel" hidden>
+          <h3>Rounds</h3>
+          <p id="loop-status"></p>
+          <ol class="rounds" id="rounds"></ol>
         </div>
       </div>
     </div>
@@ -206,14 +228,25 @@ const VERDICTS = {
   pipeline_success: ["This pipeline passed: there is nothing to fix", "ok"],
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],
   error: ["The analysis stopped with an error", "bad"],
+  pipeline_fixed: ["The pipeline passes: the draft merge request is open", "ok"],
+  max_rounds_reached: ["Round limit reached before a green pipeline: the fixes so far are on the branch", "warn"],
+  repeated_failure: ["The same errors came back after a fix: a human review is needed", "warn"],
+  pipeline_timeout: ["GitLab did not finish the pipeline in time", "warn"],
+  pipeline_sha_mismatch: ["GitLab ran the pipeline on another commit: check the fix branch", "bad"],
+  pipeline_canceled: ["The pipeline of the fix was canceled in GitLab", "warn"],
+  pipeline_skipped: ["GitLab skipped the pipeline of the fix branch: check the CI rules", "warn"],
+  validation_unavailable: ["GitLab did not return the commit: the pipeline cannot be checked", "bad"],
+  no_failed_jobs: ["The pipeline has no failed job left to fix", "warn"],
+  no_change_proposed: ["The fixer proposed no change for the new errors", "warn"],
 };
-let token = "", runId = "", runKey = "", patch = "";
+let token = "", runId = "", runKey = "", patch = "", loopId = "";
 
 drawTrack(Object.keys(STAGE_LABELS).map((name) => ({ name, state: "pending" })));
 
 $("form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  hide("form-error"); hide("result"); hide("published"); hide("publish-error");
+  hide("form-error"); hide("result"); hide("published"); hide("publish-error"); hide("loop-panel");
+  loopId = "";
   token = $("token").value.trim();
   const body = {
     access_code: $("access").value.trim(),
@@ -244,7 +277,6 @@ const MAX_POLL_FAILURES = 12;
 let pollFailures = 0;
 
 async function poll() {
-<<<<<<< HEAD
   let response, data;
   try {
     response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
@@ -262,15 +294,6 @@ async function poll() {
   if (!response.ok) {
     hide("empty");
     show("form-error", "This analysis is no longer available (PipeFix may have restarted). Start it again.");
-=======
-  const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
-  if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
-  let data;
-  try {
-    data = await readJson(response);
-  } catch (error) {
-    show("form-error", error.message);
->>>>>>> 9368335 (refactor: improve Flask modularity and iterative pipeline remediation)
     $("start").disabled = false;
     return;
   }
@@ -322,7 +345,7 @@ function showResult(report, diff, mergeRequest) {
     $("files-summary").textContent = files.length === 1 ? "1 file changed" : `${files.length} files changed`;
     $("files").replaceChildren(...files.map(fileBlock));
   }
-  $("publish").disabled = false;
+  setActions(true);
   if (mergeRequest) showPublished(mergeRequest);
   show("result");
 }
@@ -378,30 +401,149 @@ function diffLine(line) {
   return span;
 }
 
+// The token may have been left empty for the analysis: it is needed to write to GitLab (api scope).
+function writeToken() {
+  if (!token) token = $("publish-token").value.trim();
+  if (!token) {
+    show("publish-token-row");
+    show("publish-error", "Writing to GitLab needs an access token with the api scope.");
+  }
+  return token;
+}
+
+function setActions(enabled) {
+  $("publish").disabled = !enabled;
+  $("loop").disabled = !enabled;
+}
+
+$("loop").addEventListener("click", async () => {
+  setActions(false);
+  hide("publish-error");
+  if (!writeToken()) { setActions(true); return; }
+  try {
+    const answer = await send(`/web/runs/${runId}/fix-until-green`, null, { "X-Run-Key": runKey, "X-Gitlab-Token": token });
+    loopId = answer.run_id;
+    $("rounds").replaceChildren();
+    show("loop-panel");
+    show("loop-status", "Committing the fix and waiting for the pipeline of GitLab...");
+    pollFailures = 0;
+    pollLoop();
+  } catch (error) {
+    show("publish-error", error.message);
+    setActions(true);
+  }
+});
+
+async function pollLoop() {
+  let response, data;
+  try {
+    response = await fetch(`/web/runs/${loopId}`, { headers: { "X-Run-Key": runKey } });
+    if (response.ok) data = await response.json();
+  } catch (error) {
+    pollFailures += 1;
+    if (pollFailures <= MAX_POLL_FAILURES) { setTimeout(pollLoop, 5000); return; }
+    show("loop-status", "PipeFix does not answer any more. The fixes already made stay on the fix branch in GitLab.");
+    return;
+  }
+  pollFailures = 0;
+  if (!response.ok) {
+    show("loop-status", "This run is no longer available (PipeFix may have restarted). Check the fix branch in GitLab.");
+    return;
+  }
+  drawTrack(data.stages);
+  drawRounds(data.rounds || []);
+  const run = data.run || {};
+  const status = run.status || "running";
+  if (status === "running" || status === "queued") {
+    show("loop-status", loopProgress(data.rounds || []));
+    setTimeout(pollLoop, 5000);
+    return;
+  }
+  const [text, level] = VERDICTS[status] || [`Finished: ${status}`, "warn"];
+  $("verdict").className = `verdict ${level}`;
+  $("verdict-text").textContent = text;
+  const branch = run.fix_branch ? ` Fix branch: ${run.fix_branch}.` : "";
+  show("loop-status", (run.error ? `${run.error}` : "Finished.") + branch);
+  if (run.merge_request) showPublished(run.merge_request);
+}
+
+function loopProgress(rounds) {
+  const last = rounds.at(-1);
+  if (!last) return "Committing the fix and waiting for the pipeline of GitLab...";
+  if (last.commit && !last.result) return `Round ${last.number}: fix committed, GitLab is running the pipeline...`;
+  if (last.result) return `Round ${last.number}: pipeline ${last.result.status}.`;
+  return `Round ${last.number}: the agents are working on the errors of the pipeline...`;
+}
+
+function link(url, text) {
+  const anchor = tag("a", text);
+  if (url) { anchor.href = url; anchor.target = "_blank"; anchor.rel = "noopener"; }
+  return anchor;
+}
+
+function drawRounds(rounds) {
+  $("rounds").replaceChildren(...rounds.map((round) => {
+    const item = tag("li", "");
+    item.className = "round";
+    const title = tag("h4", `Round ${round.number}`);
+    const result = round.result || {};
+    const badge = tag("span", result.status === "success" ? "pipeline passed"
+      : result.status ? `pipeline ${result.status}` : round.commit ? "pipeline running" : "fixing");
+    badge.className = `badge ${result.status === "success" ? "pass" : result.status ? "fail" : "run"}`;
+    title.append(badge);
+    item.append(title);
+    for (const job of round.errors || []) {
+      const label = tag("p", "Errors in job ");
+      label.className = "job";
+      label.append(link(job.url, job.job || "job"));
+      if (round.pipeline) label.append(` of pipeline #${round.pipeline}`);
+      const lines = job.lines && job.lines.length ? job.lines.join("\n") : "(no error line recognised: open the job log)";
+      const errors = tag("pre", lines);
+      errors.className = "errors";
+      item.append(label, errors);
+    }
+    const rows = [
+      ["Cause", round.cause],
+      ["Fix", round.fix],
+      ["Files", (round.files || []).join(", ")],
+    ].filter(([, value]) => value);
+    const details = document.createElement("dl");
+    details.append(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
+    if (round.commit && round.commit.sha) {
+      const commit = tag("dd", "");
+      commit.append(link(round.commit.url, round.commit.sha.slice(0, 8)));
+      details.append(tag("dt", "Commit"), commit);
+    }
+    if (result.pipeline) {
+      const pipeline = tag("dd", "");
+      pipeline.append(link(result.url, `#${result.pipeline}`), ` ${result.status}`);
+      details.append(tag("dt", "Pipeline"), pipeline);
+    }
+    if (details.childElementCount) item.append(details);
+    return item;
+  }));
+}
+
 $("publish").addEventListener("click", async () => {
-  $("publish").disabled = true;
+  setActions(false);
   hide("publish-error");
   try {
-    // The token may have been left empty for the analysis: it is needed now (api scope).
-    if (!token) token = $("publish-token").value.trim();
-    if (!token) {
-      show("publish-token-row");
-      show("publish-error", "Creating the merge request needs an access token with the api scope.");
-      $("publish").disabled = false;
+    if (!writeToken()) {
+      setActions(true);
       return;
     }
     const answer = await send(`/web/runs/${runId}/publish`, null, { "X-Run-Key": runKey, "X-Gitlab-Token": token });
     showPublished(answer.merge_request);
   } catch (error) {
     show("publish-error", error.message);
-    $("publish").disabled = false;
+    setActions(true);
   }
 });
 
 function showPublished(url) {
   $("mr-link").href = url;
   $("mr-link").textContent = url;
-  $("publish").disabled = true;
+  setActions(false);
   show("published");
 }
 

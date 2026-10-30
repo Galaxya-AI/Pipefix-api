@@ -89,15 +89,18 @@ class RemediationWorkflow:
         self.waiter = waiter or PipelineWaiter(platform, journal)
         self.notifier = notifier or FailureNotifier(platform, journal)
 
-    def run(self, project: str, pipeline_id: int | None = None) -> dict[str, Any]:
-        """Remediate a failed pipeline (the latest one when no id is given); the report also goes to report.json."""
-        report: dict[str, Any] = {
+    def new_report(self, project: str) -> dict[str, Any]:
+        return {
             "run_id": self.journal.run_id,
             "project": project,
             "dry_run": self.dry_run,
             "policy": self.policy.as_dict(),
             "rounds": [],
         }
+
+    def run(self, project: str, pipeline_id: int | None = None) -> dict[str, Any]:
+        """Remediate a failed pipeline (the latest one when no id is given); the report also goes to report.json."""
+        report = self.new_report(project)
         self.journal.log("workflow", "start", {"project": project, "pipeline_id": pipeline_id})
         try:
             report["status"] = self.process(project, pipeline_id, report)
@@ -105,6 +108,37 @@ class RemediationWorkflow:
         except ConnectorError as error:
             report["status"] = "error"
             report["error"] = str(error)
+        return self.finish(project, report)
+
+    def run_saved_fix(
+        self, project: str, pipeline: dict[str, Any], first_result: RoundResult, branch: str
+    ) -> dict[str, Any]:
+        """Publish a fix approved in an earlier dry run, then keep fixing until the pipeline passes.
+
+        Used by the web page: the visitor saw and accepted the first fix; the next rounds
+        are run on the same branch, and the draft merge request opens only on a green pipeline.
+        """
+        report = self.new_report(project)
+        report["pipeline"] = {"id": pipeline.get("id"), "branch": pipeline.get("ref"), "url": pipeline.get("web_url")}
+        report["fix_branch"] = branch
+        start = {"project": project, "pipeline_id": pipeline.get("id"), "saved_fix": True}
+        self.journal.log("workflow", "start", start)
+        try:
+            decision = check_project_policy(self.platform, self.policy, self.agents.values(), project, self.journal)
+            if not decision.allowed:
+                report["error"] = decision.reason
+                report["status"] = STATUS_BLOCKED
+            else:
+                report["status"] = self.run_rounds(
+                    project, pipeline, decision.allow_research, report, first_result=first_result
+                )
+        except ConnectorError as error:
+            report["status"] = "error"
+            report["error"] = str(error)
+        return self.finish(project, report)
+
+    def finish(self, project: str, report: dict[str, Any]) -> dict[str, Any]:
+        """Notify, add the LLM usage, write report.json and return the report."""
         report["notification"] = self.notifier.notify(project, report, self.dry_run)
         report["usage"] = {"llm_calls": self.runner.usage.total_calls(), "per_agent": self.runner.usage.as_dict()}
         self.journal.write_report(report)
@@ -146,11 +180,19 @@ class RemediationWorkflow:
             )
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
-    def run_rounds(self, project: str, pipeline: dict[str, Any], allow_research: bool, report: dict[str, Any]) -> str:
+    def run_rounds(
+        self,
+        project: str,
+        pipeline: dict[str, Any],
+        allow_research: bool,
+        report: dict[str, Any],
+        first_result: RoundResult | None = None,
+    ) -> str:
         """Accumulate corrections on one branch; open a draft MR only after CI succeeds.
 
         With WAIT_FOR_PIPELINE disabled we retain the original single-fix workflow.
         Every wait is pinned to the SHA returned by GitLab, not just the branch.
+        first_result: the fix of round 1 when it was already approved (web page), so the agents are not run again.
         """
         current = pipeline
         branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"]), self.journal.run_id))
@@ -171,8 +213,13 @@ class RemediationWorkflow:
                     return "repeated_failure"
                 if signature:
                     seen_failures.add(signature)
-            result = self.remediation_round.run(project, current, allow_research)
+            if round_number == 1 and first_result is not None:
+                self.remediation_round.record_errors(project, current)
+                result = first_result
+            else:
+                result = self.remediation_round.run(project, current, allow_research)
             report["rounds"].append(result.as_report())
+            self.log_round_result(round_number, result)
             if result.status != "fix_ready":
                 return result.status
             if self.dry_run:
@@ -199,6 +246,18 @@ class RemediationWorkflow:
                 report["error"] = "GitLab did not return a commit SHA; cannot verify the pipeline."
                 return "validation_unavailable"
             finished = self.waiter.wait(project, branch, sha, self.pipeline_timeout_s)
+            self.journal.log(
+                "workflow",
+                "validation",
+                {
+                    "number": round_number,
+                    "commit_sha": sha,
+                    "commit_url": commit.get("web_url"),
+                    "pipeline_id": finished.get("id") if finished else None,
+                    "pipeline_url": finished.get("web_url") if finished else None,
+                    "status": finished.get("status") if finished else "timeout",
+                },
+            )
             validation = validation_record(finished, sha)
             report["validations"][-1].update(validation)
             report["validation"] = validation
@@ -218,6 +277,23 @@ class RemediationWorkflow:
         report["validation"] = {"verified": False, "reason": "max_rounds_reached"}
         report["error"] = "The iteration limit was reached; no MR was opened without passing CI."
         return "max_rounds_reached"
+
+    def log_round_result(self, round_number: int, result: RoundResult) -> None:
+        """Record what the agents found and changed in this round, for the web page."""
+        # getattr: a round stopped early may have no diagnosis or fix
+        diagnosis = getattr(result, "diagnosis", None)
+        fix = getattr(result, "fix", None)
+        self.journal.log(
+            "workflow",
+            "round_result",
+            {
+                "number": round_number,
+                "status": getattr(result, "status", ""),
+                "cause": getattr(diagnosis, "root_cause", None),
+                "fix": getattr(fix, "summary", None),
+                "files": sorted(getattr(result, "files", None) or {}),
+            },
+        )
 
     def commit_fix(self, project: str, pipeline: dict[str, Any], branch: str, result: RoundResult) -> dict[str, Any]:
         """Commit on the isolated work branch, never directly on the target.

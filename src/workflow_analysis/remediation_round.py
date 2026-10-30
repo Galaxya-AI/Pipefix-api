@@ -21,7 +21,7 @@ from changeset.changeset import Changeset
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
-from text_tools.log_cleaning import clean_log
+from text_tools.log_cleaning import clean_log, error_summary, mask_secrets, strip_ansi
 from tools.tool import Tool
 from workflow_analysis.task_messages import diagnosis_task, fix_task, pipeline_context, review_task
 from workflow_analysis.toolbox import build_run_registry
@@ -36,6 +36,9 @@ AUTO_RETRY_FLAKY = env_bool("AUTO_RETRY_FLAKY", False)
 # Log lines of each failed job given to every agent, after the error summary of the whole log
 CONTEXT_LOG_LINES = env_int("CONTEXT_LOG_LINES", 150)
 MAX_CONTEXT_JOBS = env_int("MAX_CONTEXT_JOBS", 5, minimum=1)
+
+# Error lines of each failed job shown on the web page for every round
+ERRORS_SHOWN_PER_JOB = 30
 
 
 class RemediationRound:
@@ -83,14 +86,33 @@ class RemediationRound:
             self.tools, project, sha, changeset, self.policy, self.journal, allow_research
         )
         logs = []
+        traces: dict[int, str] = {}
         for job in jobs[:MAX_CONTEXT_JOBS]:
-            excerpt = clean_log(self.platform.job_trace(project, int(job["id"])), CONTEXT_LOG_LINES)
+            traces[int(job["id"])] = self.platform.job_trace(project, int(job["id"]))
+            excerpt = clean_log(traces[int(job["id"])], CONTEXT_LOG_LINES)
             logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
+        self.log_errors(pipeline, jobs, traces)
         context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
         if not self.analyse(project, context, result):
             return result
         self.fix_and_review(context, changeset, result)
         return result
+
+    def log_errors(self, pipeline: dict[str, Any], jobs: list[dict[str, Any]], traces: dict[int, str]) -> None:
+        """Record the error lines of each failed job, so the web page can show them for this round."""
+        shown = []
+        for job in jobs[:MAX_CONTEXT_JOBS]:
+            trace = traces.get(int(job["id"]), "")
+            lines = error_summary(mask_secrets(strip_ansi(trace)), ERRORS_SHOWN_PER_JOB)
+            shown.append({"job": str(job.get("name", "")), "url": job.get("web_url"), "lines": lines})
+        details = {"pipeline": pipeline.get("id"), "pipeline_url": pipeline.get("web_url"), "jobs": shown}
+        self.journal.log("remediation_round", "errors", details)
+
+    def record_errors(self, project: str, pipeline: dict[str, Any]) -> None:
+        """Record the errors of a pipeline without running the agents (round fixed by an earlier analysis)."""
+        jobs = self.failed_jobs(project, pipeline)
+        traces = {int(job["id"]): self.platform.job_trace(project, int(job["id"])) for job in jobs[:MAX_CONTEXT_JOBS]}
+        self.log_errors(pipeline, jobs, traces)
 
     def analyse(self, project: str, context: str, result: RoundResult) -> bool:
         """Run the triage, then the diagnosis if code can fix the failure; True if a diagnosis is ready."""

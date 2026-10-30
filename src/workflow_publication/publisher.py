@@ -76,11 +76,8 @@ class Publisher:
         return merge_request
 
 
-def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[str, Any]) -> str:
-    """Publish the fix of a finished dry run exactly as it was shown, and return the merge request URL."""
-    published = journal.folder / MERGE_REQUEST_FILE
-    if published.is_file():
-        return published.read_text(encoding="utf-8")
+def load_saved_fix(journal: RunJournal, report: dict[str, Any]) -> tuple[dict[str, Any], RoundResult, str]:
+    """Return the analysed pipeline, the approved fix and the fix branch of a finished dry run."""
     saved = json.loads((journal.folder / SAVED_FIX_FILE).read_text(encoding="utf-8"))
     pipeline: dict[str, Any] = saved["pipeline"]
     last = report["rounds"][-1]
@@ -93,10 +90,19 @@ def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[
         review=ReviewOutput.model_validate(last["review"]),
         files=saved["files"],
     )
+    branch = str(saved.get("branch") or fix_branch_name(result.pipeline_id))
+    return pipeline, result, branch
+
+
+def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[str, Any]) -> str:
+    """Publish the fix of a finished dry run exactly as it was shown, and return the merge request URL."""
+    published = journal.folder / MERGE_REQUEST_FILE
+    if published.is_file():
+        return published.read_text(encoding="utf-8")
+    pipeline, result, branch = load_saved_fix(journal, report)
     project = str(report["project"])
     target_branch = str(pipeline.get("ref", ""))
     analysed_sha = str(pipeline.get("sha", ""))
-    branch = str(saved.get("branch") or fix_branch_name(result.pipeline_id))
     publisher = Publisher(platform, journal)
     start_sha = None if platform.branch_exists(project, branch) else analysed_sha
     publisher.commit(project, branch, result, start_sha=start_sha)

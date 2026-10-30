@@ -113,9 +113,46 @@ def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
         # An agent that could not finish: the reason is for the developers' logs, not for the visitor.
         "error": None if str(run.get("status", "")).endswith("_failed") else last.get("error"),
     }
-    view = {key: run.get(key) for key in ("status", "project", "error", "merge_request_url") if run.get(key)}
+    keys = ("status", "project", "error", "merge_request_url", "merge_request", "fix_branch")
+    view = {key: run.get(key) for key in keys if run.get(key)}
     view["rounds"] = [shown] if run.get("rounds") else []
     return view
+
+
+def round_views(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per round, built from the journal while the run goes on.
+
+    Each round shows the errors of the pipeline it starts from, what the agents found and
+    changed, and the pipeline GitLab ran on the new commit.
+    """
+    rounds: list[dict[str, Any]] = []
+    for event in events:
+        name = (event.get("actor"), event.get("event"))
+        data = event.get("data") or {}
+        if name == ("workflow", "round"):
+            rounds.append({"number": data.get("number"), "pipeline": data.get("pipeline")})
+            continue
+        if not rounds:
+            continue
+        current = rounds[-1]
+        if name == ("remediation_round", "errors"):
+            current["pipeline_url"] = data.get("pipeline_url")
+            current["errors"] = [
+                {"job": job.get("job"), "url": job.get("url"), "lines": list(job.get("lines") or [])}
+                for job in data.get("jobs") or []
+            ]
+        elif name == ("workflow", "round_result"):
+            current.update(
+                {key: data.get(key) for key in ("status", "cause", "fix", "files")}
+            )
+        elif name == ("workflow", "validation"):
+            current["commit"] = {"sha": data.get("commit_sha"), "url": data.get("commit_url")}
+            current["result"] = {
+                "status": data.get("status"),
+                "pipeline": data.get("pipeline_id"),
+                "url": data.get("pipeline_url"),
+            }
+    return rounds
 
 
 def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:
