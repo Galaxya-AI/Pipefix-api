@@ -16,6 +16,8 @@ Routes:
 - POST /web/runs                             dry run on the visitor's project -> 202 {"run_id": ..., "run_key": ...}
 - GET  /web/runs/<run_id>                    status, agents and patch of a web run (X-Run-Key header)
 - POST /web/runs/<run_id>/publish            publish that fix as a draft merge request (X-Run-Key + X-Gitlab-Token)
+- POST /web/runs/<run_id>/fix-until-green    publish that fix, then keep fixing until the pipeline passes;
+                                             answers a new run id, followed with the same run key
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from app_runs.thread_launcher import ThreadLauncher
 from connectors.errors.errors import ConnectorError
 from connectors.gitlab.client import GitLabClient
 from journal.run_journal import RunJournal
-from startup.services import build_api_services, build_user_run_function
+from startup.services import build_api_services, build_user_loop_function, build_user_run_function
 from web_support import (
     access_owner,
     check_pipeline_to_fix,
@@ -42,15 +44,19 @@ from web_support import (
     public_run,
     published_merge_request,
     read_pipeline_number,
+    round_views,
     secret_hash,
     stage_states,
     web_owner,
     web_owners,
 )
-from workflow_publication.publisher import publish_saved_fix
+from workflow_publication.publisher import MERGE_REQUEST_FILE, load_saved_fix, publish_saved_fix
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# Written in a web run folder once its fix went into the loop: the id of the loop run
+LOOP_RUN_FILE = "loop_run.id"
 
 # Pipelines of these branches are ignored: they are the system's own fix branches
 FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
@@ -279,6 +285,7 @@ def get_web_run(run_id: str) -> Response:
         {
             "run": public_run(run),
             "stages": stage_states(events, finished),
+            "rounds": round_views(events),
             "patch": services.store.patch(run_id),
             "merge_request": published_merge_request(run_id, services.store),
         }
@@ -306,6 +313,47 @@ def publish_web_run(run_id: str) -> Response:
             "the token needs the api scope and the Developer role on the project.",
         )
     return jsonify({"merge_request": url})
+
+
+@app.post("/web/runs/<run_id>/fix-until-green")
+def fix_web_run_until_green(run_id: str) -> Response:
+    """Publish the fix shown to the visitor, then keep fixing until the pipeline passes (needs the api scope).
+
+    The loop runs in the background as a new run; the page follows it with the same run key.
+    The draft merge request opens only when GitLab reports a green pipeline.
+    """
+    gitlab_url = web_owner(run_id)
+    gitlab_token = request.headers.get("X-Gitlab-Token", "").strip()
+    if not gitlab_token:
+        abort(400, description="Fixing until the pipeline passes needs an access token with the api scope.")
+    folder = services.store.folder(run_id)
+    if folder is None:
+        abort(404, description=f"Unknown run: {run_id}")
+    # Asked twice (double click, page reloaded): the same loop, never a second one.
+    if (folder / LOOP_RUN_FILE).is_file():
+        return jsonify({"run_id": (folder / LOOP_RUN_FILE).read_text(encoding="utf-8").strip()})
+    if (folder / MERGE_REQUEST_FILE).is_file():
+        abort(409, description="This fix was already published as a merge request.")
+    report = services.store.read_report(run_id)
+    if report is None or report.get("status") != "dry_run_patch_ready":
+        abort(409, description="This run has no fix to publish.")
+    journal = RunJournal(services.store.runs_dir, run_id, verbose=False)
+    pipeline, first_result, branch = load_saved_fix(journal, report)
+    project = str(report["project"])
+    client = GitLabClient(gitlab_url, gitlab_token)
+    try:
+        # Checked now, so a wrong token is reported here and not after minutes of work.
+        client.get_project(project)
+    except ConnectorError as error:
+        abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
+    run_function = build_user_loop_function(gitlab_url, gitlab_token, services.tools, pipeline, first_result, branch)
+    launcher = ThreadLauncher(run_function, services.store)
+    loop_id = launcher.launch(project, int(pipeline["id"]), dry_run=False)
+    # The visitor follows the loop with the key of the analysis.
+    web_owners[loop_id] = web_owners[run_id]
+    journal.write_text(LOOP_RUN_FILE, loop_id)
+    journal.log("web", "loop_started", {"loop_run": loop_id})
+    return jsonify({"run_id": loop_id})
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from workflow_remediation.remediation_workflow import (
     WAIT_FOR_PIPELINE,
     RemediationWorkflow,
 )
+from workflow_remediation.round_result import RoundResult
 
 # Empty: no check, local use only.
 API_TOKEN = os.getenv("API_TOKEN", "")
@@ -87,13 +88,45 @@ def build_run_function(
     return run_remediation
 
 
+def user_tools(client: GitLabClient, tools: list[Tool]) -> list[Tool]:
+    """The GitLab tools of the user's client, then the server's other tools."""
+    gitlab_tools = GitLabConnector(client).tools()
+    names = {tool.name for tool in gitlab_tools}
+    return [*gitlab_tools, *(tool for tool in tools if tool.name not in names)]
+
+
 def build_user_run_function(gitlab_url: str, gitlab_token: str, tools: list[Tool]) -> RunFunction:
     """Run function of a web user: GitLab is read with the user's own token, the LLMs stay the server's."""
     client = GitLabClient(gitlab_url, gitlab_token)
-    gitlab_tools = GitLabConnector(client).tools()
-    names = {tool.name for tool in gitlab_tools}
-    others = [tool for tool in tools if tool.name not in names]
-    return build_run_function(client, build_llm_client(), build_agents(), [*gitlab_tools, *others])
+    return build_run_function(client, build_llm_client(), build_agents(), user_tools(client, tools))
+
+
+def build_user_loop_function(
+    gitlab_url: str,
+    gitlab_token: str,
+    tools: list[Tool],
+    pipeline: dict[str, Any],
+    first_result: RoundResult,
+    branch: str,
+) -> RunFunction:
+    """Run function of the web button "fix until the pipeline passes".
+
+    It publishes the fix the visitor accepted, waits for GitLab CI and runs new rounds while it fails,
+    whatever DRY_RUN and WAIT_FOR_PIPELINE say: the visitor asked for exactly this. MAX_ROUNDS still applies.
+    The token stays in this function only for the time of the run.
+    """
+    client = GitLabClient(gitlab_url, gitlab_token)
+    llm = build_llm_client()
+    agents = build_agents()
+    run_tools = user_tools(client, tools)
+
+    def run_loop(project: str, pipeline_id: int | None, dry_run: bool, journal: RunJournal) -> dict[str, Any]:
+        workflow = RemediationWorkflow(
+            client, llm, agents, run_tools, journal, dry_run=False, wait_for_pipeline=True
+        )
+        return workflow.run_saved_fix(project, pipeline, first_result, branch)
+
+    return run_loop
 
 
 def build_job_services() -> tuple[RunFunction, Callable[[], None]]:
