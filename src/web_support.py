@@ -1,8 +1,10 @@
 """Web access, URL parsing, and presentation helpers for PipeFix."""
+
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 from pathlib import Path
@@ -115,4 +117,3 @@ def published_merge_request(run_id: str, store: Any) -> str | None:
     if folder is None or not (folder / MERGE_REQUEST_FILE).is_file():
         return None
     return (folder / MERGE_REQUEST_FILE).read_text(encoding="utf-8")
-
