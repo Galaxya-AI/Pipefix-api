@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
-AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS", "10"))
+from startup.env_values import env_int
+
+AGENT_MAX_TURNS = env_int("AGENT_MAX_TURNS", 10, minimum=1)
 # Invalid final answers accepted before the run is stopped
-AGENT_MAX_INVALID_ANSWERS = int(os.getenv("AGENT_MAX_INVALID_ANSWERS", "2"))
-AGENT_MAX_SUB_AGENT_DEPTH = int(os.getenv("AGENT_MAX_SUB_AGENT_DEPTH", "2"))
+AGENT_MAX_INVALID_ANSWERS = env_int("AGENT_MAX_INVALID_ANSWERS", 2, minimum=0)
+AGENT_MAX_SUB_AGENT_DEPTH = env_int("AGENT_MAX_SUB_AGENT_DEPTH", 2, minimum=0)
 # Cost guard: LLM calls for a whole run, all agents together
-MAX_LLM_CALLS_PER_RUN = int(os.getenv("MAX_LLM_CALLS_PER_RUN", "60"))
+MAX_LLM_CALLS_PER_RUN = env_int("MAX_LLM_CALLS_PER_RUN", 60, minimum=1)
 
 
 @dataclass(frozen=True)
