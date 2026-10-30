@@ -1,8 +1,10 @@
 """Web access, URL parsing, and presentation helpers for PipeFix."""
+
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 from pathlib import Path
@@ -91,7 +93,7 @@ def web_owner(run_id: str, store: Any) -> str:
         or not hmac.compare_digest(owner["run_key_hash"], secret_hash(key))
     ):
         abort(404, description=f"Unknown run: {run_id}")
-    return owner["gitlab_url"]
+    return str(owner["gitlab_url"])
 
 
 def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:
@@ -114,5 +116,4 @@ def published_merge_request(run_id: str, store: Any) -> str | None:
     folder = store.folder(run_id)
     if folder is None or not (folder / MERGE_REQUEST_FILE).is_file():
         return None
-    return (folder / MERGE_REQUEST_FILE).read_text(encoding="utf-8")
-
+    return str((folder / MERGE_REQUEST_FILE).read_text(encoding="utf-8"))

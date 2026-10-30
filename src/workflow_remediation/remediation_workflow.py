@@ -13,7 +13,6 @@ In dry-run mode, the patch is only written to the run folder.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -24,6 +23,8 @@ from connectors.errors.errors import ConnectorError
 from journal.run_journal import RunJournal
 from llm.base import LLMClient
 from policy.data_policy import DataPolicy
+from startup.env_values import env_bool, env_int
+from text_tools.log_cleaning import failure_fingerprint
 from tools.registry import ToolRegistry
 from tools.tool import Tool
 from workflow_analysis.pipeline_selection import find_pipeline, refusal_status
@@ -38,14 +39,14 @@ from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
 
 # Dry-run mode: write the patch, publish nothing
-DRY_RUN = os.getenv("DRY_RUN", "true").strip().lower() in ("1", "true", "yes")
+DRY_RUN = env_bool("DRY_RUN", True)
 
 # Rounds "fix -> wait for the pipeline -> fix again"
-MAX_ROUNDS = int(os.getenv("MAX_ROUNDS", "1"))
+MAX_ROUNDS = env_int("MAX_ROUNDS", 1, minimum=1)
 
-WAIT_FOR_PIPELINE = os.getenv("WAIT_FOR_PIPELINE", "false").strip().lower() in ("1", "true", "yes")
+WAIT_FOR_PIPELINE = env_bool("WAIT_FOR_PIPELINE", False)
 
-PIPELINE_TIMEOUT_S = int(os.getenv("PIPELINE_TIMEOUT_S", "1800"))
+PIPELINE_TIMEOUT_S = env_int("PIPELINE_TIMEOUT_S", 1800, minimum=60)
 
 
 class RemediationWorkflow:
@@ -160,10 +161,12 @@ class RemediationWorkflow:
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             if self.wait_for_pipeline and not self.dry_run:
                 failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
+                # The error lines, without durations or ids: two runs of the same error match,
+                # a new error hidden by the previous one does not.
                 signature = tuple(
                     sorted(
                         f"{job.get('name', '')}:{job.get('failure_reason', '')}:"
-                        f"{self.platform.job_trace(project, int(job['id']))[-1000:]}"
+                        f"{failure_fingerprint(self.platform.job_trace(project, int(job['id'])))}"
                         for job in failing_jobs
                     )
                 )
@@ -205,8 +208,8 @@ class RemediationWorkflow:
             if status == "pipeline_fixed":
                 self.open_fix_mr(project, pipeline, branch, last_result, report)
                 return "pipeline_fixed"
-            if status is not None:
-                return status
+            if status is not None or finished is None:
+                return status or "pipeline_timeout"
             # The next round reads files at this fix-branch pipeline's commit.
             current = finished
         report["error"] = "The iteration limit was reached; no MR was opened without passing CI."
@@ -215,10 +218,13 @@ class RemediationWorkflow:
     def commit_fix(
         self, project: str, pipeline: dict[str, Any], branch: str, result: RoundResult
     ) -> dict[str, Any]:
-        """Commit on the isolated work branch, never directly on the target."""
-        if not self.platform.branch_exists(project, branch):
-            self.publisher.create_branch(project, branch, str(pipeline.get("sha", "")))
-        return self.publisher.commit(project, branch, result)
+        """Commit on the isolated work branch, never directly on the target.
+
+        The first commit also creates the branch from the analysed commit, in one call:
+        creating the branch alone would start a useless pipeline on the unchanged code.
+        """
+        start_sha = None if self.platform.branch_exists(project, branch) else str(pipeline.get("sha", ""))
+        return self.publisher.commit(project, branch, result, start_sha=start_sha)
 
     def open_fix_mr(
         self,

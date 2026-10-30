@@ -41,10 +41,14 @@ class Publisher:
         self.journal.log("publisher", "branch", {"branch": branch, "from": ref})
         return created
 
-    def commit(self, project: str, branch: str, result: RoundResult) -> dict[str, Any]:
+    def commit(
+        self, project: str, branch: str, result: RoundResult, start_sha: str | None = None
+    ) -> dict[str, Any]:
+        """Commit the fix; with start_sha, the branch is created from that commit by the same call."""
         actions = commit_actions(result)
-        commit = self.platform.create_commit(project, branch, commit_message(result), actions)
-        self.journal.log("publisher", "commit", {"branch": branch, "sha": commit.get("id"), "files": len(actions)})
+        commit = self.platform.create_commit(project, branch, commit_message(result), actions, start_sha=start_sha)
+        details = {"branch": branch, "sha": commit.get("id"), "files": len(actions), "new_branch": bool(start_sha)}
+        self.journal.log("publisher", "commit", details)
         return commit
 
     def open_merge_request(
@@ -94,9 +98,8 @@ def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[
     analysed_sha = str(pipeline.get("sha", ""))
     branch = str(saved.get("branch") or fix_branch_name(result.pipeline_id))
     publisher = Publisher(platform, journal)
-    if not platform.branch_exists(project, branch):
-        publisher.create_branch(project, branch, analysed_sha)
-    publisher.commit(project, branch, result)
+    start_sha = None if platform.branch_exists(project, branch) else analysed_sha
+    publisher.commit(project, branch, result, start_sha=start_sha)
     base_moved = platform.branch_head(project, target_branch) != analysed_sha
     merge_request = publisher.open_merge_request(project, branch, target_branch, pipeline, result, base_moved)
     url = str(merge_request.get("web_url", ""))

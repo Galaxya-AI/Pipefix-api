@@ -9,7 +9,6 @@ Order of one round (rules in workflow_remediation.transitions):
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -21,6 +20,7 @@ from agents.triage import TriageOutput
 from changeset.changeset import Changeset
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
+from startup.env_values import env_bool, env_int
 from text_tools.log_cleaning import clean_log
 from tools.tool import Tool
 from workflow_analysis.task_messages import diagnosis_task, fix_task, pipeline_context, review_task
@@ -29,13 +29,13 @@ from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
 from workflow_remediation.transitions import STATUS_INFRA_FLAKY, STATUS_NOT_FIXABLE, STEP_PUBLISH, next_step
 
-MAX_FIX_ATTEMPTS = int(os.getenv("MAX_FIX_ATTEMPTS", "2"))
+MAX_FIX_ATTEMPTS = env_int("MAX_FIX_ATTEMPTS", 2, minimum=1)
 
-AUTO_RETRY_FLAKY = os.getenv("AUTO_RETRY_FLAKY", "false").strip().lower() in ("1", "true", "yes")
+AUTO_RETRY_FLAKY = env_bool("AUTO_RETRY_FLAKY", False)
 
-# Log lines of the first failed job given to every agent
-CONTEXT_LOG_LINES = int(os.getenv("CONTEXT_LOG_LINES", "150"))
-MAX_CONTEXT_JOBS = max(1, int(os.getenv("MAX_CONTEXT_JOBS", "5")))
+# Log lines of each failed job given to every agent, after the error summary of the whole log
+CONTEXT_LOG_LINES = env_int("CONTEXT_LOG_LINES", 150)
+MAX_CONTEXT_JOBS = env_int("MAX_CONTEXT_JOBS", 5, minimum=1)
 
 
 class RemediationRound:

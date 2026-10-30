@@ -47,7 +47,6 @@ from connectors.errors.errors import ConnectorError
 from connectors.gitlab.client import GitLabClient
 from journal.run_journal import RunJournal
 from startup.services import build_api_services, build_user_run_function
-from workflow_publication.publisher import publish_saved_fix
 from web_support import (
     access_owner,
     parse_project_url,
@@ -56,6 +55,7 @@ from web_support import (
     stage_states,
     web_owner,
 )
+from workflow_publication.publisher import publish_saved_fix
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
