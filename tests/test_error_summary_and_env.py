@@ -94,3 +94,13 @@ def test_publisher_sends_start_sha_to_the_platform():
     result = SimpleNamespace(files={"calculator.py": "x = 1\n"}, fix=None, diagnosis=None, pipeline_id=7)
     publisher.commit("group/project", "auto-fix/pipeline-7", result, start_sha="analysed-sha")
     assert platform.create_commit.call_args.kwargs["start_sha"] == "analysed-sha"
+
+
+def test_gitlab_timestamped_log_lines_are_recognised():
+    stamped = "\n".join(
+        f"2026-10-30T21:45:{index:02d}.123456Z 00O {line}" for index, line in enumerate(RUFF_LOG.splitlines())
+    )
+    lines = error_summary(clean_log(stamped, max_lines=0))
+    assert "scheduling.py:12:5: F821 Undefined name `json`" in lines
+    assert "Found 2 errors." in lines
+    assert failure_fingerprint(stamped) == failure_fingerprint(RUFF_LOG)
