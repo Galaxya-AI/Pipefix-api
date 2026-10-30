@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any
 
-from text_tools.log_cleaning import clean_log
+from text_tools.log_cleaning import failure_fingerprint
 
 
 def failed_job_signature(jobs: list[dict[str, Any]], traces: Mapping[int, str] | None = None) -> tuple[str, ...]:
@@ -20,11 +20,9 @@ def failed_job_signature(jobs: list[dict[str, Any]], traces: Mapping[int, str] |
         name = str(job.get("name", job.get("id", "unknown")))
 
         if traces is not None:
-            # Normalise and bound the log used to identify the failure.
-            trace = clean_log(
-                traces.get(int(job["id"]), ""),
-                max_lines=150,
-            )[-20000:].strip()
+            # The error lines of the whole log, without durations or ids: two runs of the same
+            # error match, a new error hidden until now by the previous one does not.
+            trace = failure_fingerprint(traces.get(int(job["id"]), ""))
 
             digest = hashlib.sha256(trace.encode("utf-8")).hexdigest()
             name = f"{name}:{job.get('failure_reason') or ''}:{digest}"

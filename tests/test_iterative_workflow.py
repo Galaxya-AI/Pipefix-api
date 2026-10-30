@@ -52,7 +52,10 @@ def test_two_rounds_then_one_mr():
     assert wf.run_rounds("group/project", pipeline, False, report) == "pipeline_fixed"
     assert wf.publisher.commit.call_count == 2
     wf.publisher.open_merge_request.assert_called_once()
-    assert len(report["validation"]) == 2
+    assert len(report["validations"]) == 2
+    assert [item["verified"] for item in report["validations"]] == [False, True]
+    assert report["validation"]["verified"] is True
+    assert report["validation"]["commit_sha"] == "new-sha-2"
 
 
 def test_timeout_does_not_open_mr():
@@ -66,6 +69,16 @@ def test_repeated_failure_does_not_loop_forever():
     wf = make_workflow(["failed", "failed", "failed"])
     report = {"rounds": []}
     assert wf.run_rounds("group/project", {"id": 1, "sha": "initial-sha"}, False, report) == "repeated_failure"
+    wf.publisher.open_merge_request.assert_not_called()
+
+
+def test_different_failures_still_stop_at_the_round_limit():
+    wf = make_workflow(["failed", "failed", "failed"])
+    wf.platform.job_trace.side_effect = ["failure one", "failure two", "failure three"]
+    report = {"rounds": []}
+    assert wf.run_rounds("group/project", {"id": 1, "sha": "initial-sha"}, False, report) == "max_rounds_reached"
+    assert wf.publisher.commit.call_count == wf.max_rounds
+    assert report["validation"] == {"verified": False, "reason": "max_rounds_reached"}
     wf.publisher.open_merge_request.assert_not_called()
 
 
