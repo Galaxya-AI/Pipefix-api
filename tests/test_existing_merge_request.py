@@ -1,4 +1,4 @@
-"""A pipeline whose fix already waits in an open merge request is not analysed again."""
+"""An open merge request does not block a fresh diagnosis."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 import workflow_remediation.remediation_workflow as workflow_module
 from journal.run_journal import RunJournal
 from workflow_analysis.policy_check import PolicyDecision
-from workflow_remediation.remediation_workflow import STATUS_FIX_ALREADY_PROPOSED, RemediationWorkflow
+from workflow_remediation.remediation_workflow import RemediationWorkflow
 
 
 class Platform:
@@ -29,7 +29,7 @@ class Round:
 
     def run(self, *args: Any) -> Any:
         self.calls += 1
-        raise AssertionError("the agents must not run")
+        return type("Result", (), {"status": "no_fix", "as_report": lambda self: {"status": "no_fix"}})()
 
 
 class Notifier:
@@ -53,11 +53,21 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: Platform, rou
     return workflow.run("group/app", 42)
 
 
-def test_open_merge_request_stops_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_open_merge_request_allows_independent_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     platform, round_ = Platform({"web_url": "https://gitlab.com/group/app/-/merge_requests/3"}), Round()
     report = run(tmp_path, monkeypatch, platform, round_)
-    assert report["status"] == STATUS_FIX_ALREADY_PROPOSED
-    assert report["merge_request_url"].endswith("/merge_requests/3")
+    assert report["status"] == "no_fix"
+    assert report["previous_merge_request_url"].endswith("/merge_requests/3")
+    assert report["fix_branch"].startswith("auto-fix/pipeline-42-retry-")
     assert platform.asked == ["auto-fix/pipeline-42"]
-    assert round_.calls == 0
+    assert round_.calls == 1
     assert report["usage"]["llm_calls"] == 0
+
+
+def test_without_existing_merge_request_keeps_standard_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    platform, round_ = Platform(None), Round()
+    report = run(tmp_path, monkeypatch, platform, round_)
+    assert report["status"] == "no_fix"
+    assert report["fix_branch"] == "auto-fix/pipeline-42"
+    assert "previous_merge_request_url" not in report
+    assert round_.calls == 1

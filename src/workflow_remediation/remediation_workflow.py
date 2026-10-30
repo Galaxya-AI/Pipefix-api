@@ -31,8 +31,9 @@ from workflow_analysis.policy_check import STATUS_BLOCKED, check_project_policy
 from workflow_analysis.remediation_round import RemediationRound
 from workflow_publication.failure_notifier import FailureNotifier
 from workflow_publication.pipeline_waiter import PipelineWaiter, outcome_status
-from workflow_publication.publication_texts import fix_branch_name
+from workflow_publication.publication_texts import fix_branch_name, retry_branch_name
 from workflow_publication.publisher import SAVED_FIX_FILE, Publisher
+from workflow_publication.validation import failed_job_signature, validation_record
 from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
 
@@ -45,9 +46,6 @@ MAX_ROUNDS = int(os.getenv("MAX_ROUNDS", "1"))
 WAIT_FOR_PIPELINE = os.getenv("WAIT_FOR_PIPELINE", "false").strip().lower() in ("1", "true", "yes")
 
 PIPELINE_TIMEOUT_S = int(os.getenv("PIPELINE_TIMEOUT_S", "1800"))
-
-# The pipeline already has an open merge request of its fix branch
-STATUS_FIX_ALREADY_PROPOSED = "fix_already_proposed"
 
 
 class RemediationWorkflow:
@@ -127,39 +125,64 @@ class RemediationWorkflow:
         refusal: str | None = refusal_status(pipeline)
         if refusal is not None:
             return refusal
-        # A fix of this pipeline is already waiting in an open merge request: no new analysis, no second one.
-        existing = self.platform.find_merge_request(project, fix_branch_name(int(pipeline["id"])))
-        if existing is not None:
-            report["merge_request_url"] = existing.get("web_url")
-            self.journal.log("workflow", "fix_already_proposed", {"url": existing.get("web_url")})
-            return STATUS_FIX_ALREADY_PROPOSED
+        # An open MR is not proof that the pipeline was repaired. Reanalyse, but
+        # publish on an isolated branch so the pending MR is never overwritten.
+        original_branch = fix_branch_name(int(pipeline["id"]))
+        existing = self.platform.find_merge_request(project, original_branch)
+        branch = retry_branch_name(int(pipeline["id"]), self.journal.run_id) if existing else original_branch
+        report["fix_branch"] = branch
+        if existing:
+            report["previous_merge_request_url"] = existing.get("web_url")
+            report["warning"] = (
+                "A previous fix is still open; this analysis is independent. "
+                "Review both proposals and avoid merging conflicting changes."
+            )
+            self.journal.log("workflow", "previous_fix_open", {"url": existing.get("web_url"), "new_branch": branch})
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
     def run_rounds(self, project: str, pipeline: dict[str, Any], allow_research: bool, report: dict[str, Any]) -> str:
         """Run "analyse -> publish -> wait" rounds until a final status."""
         current = pipeline
+        seen_failures: set[tuple[str, ...]] = set()
         for round_number in range(1, self.max_rounds + 1):
             self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
+            # Track remaining failures without treating the same job names as proof
+            # of a successful repair. Repeated failures are surfaced for human review.
+            failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed") if self.wait_for_pipeline and not self.dry_run else []
+            signature = failed_job_signature(failing_jobs)
+            if signature and signature in seen_failures:
+                report["warning"] = "The same jobs failed after an attempted fix; manual review is required."
+                return "repeated_failure"
+            if signature:
+                seen_failures.add(signature)
             result = self.remediation_round.run(project, current, allow_research)
             report["rounds"].append(result.as_report())
             if result.status != "fix_ready":
                 return result.status
             if self.dry_run:
+                report["validation"] = {"verified": False, "reason": "dry_run"}
                 report["patch_file"] = str(self.journal.write_text("fix.patch", result.diff))
                 # Lets the web page publish this exact fix later, without a new analysis.
-                self.journal.write_text(SAVED_FIX_FILE, json.dumps({"pipeline": pipeline, "files": result.files}))
+                self.journal.write_text(SAVED_FIX_FILE, json.dumps({"pipeline": pipeline, "files": result.files, "branch": report["fix_branch"]}))
                 return "dry_run_patch_ready"
             commit = self.publish_fix(project, pipeline, result, report)
             if not self.wait_for_pipeline:
+                report["validation"] = {"verified": False, "reason": "not_requested"}
                 return "merge_request_opened"
             finished: dict[str, Any] | None = self.waiter.wait(
-                project, fix_branch_name(int(pipeline["id"])), str(commit.get("id", "")), self.pipeline_timeout_s
+                project, str(report["fix_branch"]), str(commit.get("id", "")), self.pipeline_timeout_s
             )
+            record = validation_record(finished, str(commit.get("id", "")))
+            report.setdefault("validations", []).append(record)
+            report["validation"] = record
+            if record["reason"] == "sha_mismatch":
+                return "pipeline_sha_mismatch"
             status: str | None = outcome_status(finished)
             if status is not None or finished is None:
                 return status or "pipeline_timeout"
             # Still failing: new round on the fix pipeline
             current = finished
+        report["validation"] = {"verified": False, "reason": "max_rounds_reached"}
         return "max_rounds_reached"
 
     def publish_fix(
@@ -173,7 +196,7 @@ class RemediationWorkflow:
         """
         target_branch = str(pipeline.get("ref", ""))
         analysed_sha = str(pipeline.get("sha", ""))
-        branch = fix_branch_name(int(pipeline["id"]))
+        branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"])))
         if not self.platform.branch_exists(project, branch):
             self.publisher.create_branch(project, branch, analysed_sha)
         commit = self.publisher.commit(project, branch, result)
