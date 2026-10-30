@@ -166,8 +166,8 @@ class RemediationWorkflow:
                 report["patch_file"] = str(self.journal.write_text("fix.patch", result.diff))
                 # Lets the web page publish this exact fix later, without a new analysis.
                 self.journal.write_text(SAVED_FIX_FILE, json.dumps(
-                    {"pipeline": pipeline, 
-                    "files": result.files, 
+                    {"pipeline": pipeline,
+                    "files": result.files,
                     "branch": report["fix_branch"]}
                     )
                 )
