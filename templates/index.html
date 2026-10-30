@@ -244,7 +244,6 @@ const MAX_POLL_FAILURES = 12;
 let pollFailures = 0;
 
 async function poll() {
-<<<<<<< HEAD
   let response, data;
   try {
     response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
@@ -262,7 +261,6 @@ async function poll() {
   if (!response.ok) {
     hide("empty");
     show("form-error", "This analysis is no longer available (PipeFix may have restarted). Start it again.");
-=======
   const response = await fetch(`/web/runs/${runId}`, { headers: { "X-Run-Key": runKey } });
   if (!response.ok) { show("form-error", "This run is no longer available."); $("start").disabled = false; return; }
   let data;
