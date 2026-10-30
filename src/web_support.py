@@ -16,7 +16,7 @@ from workflow_publication.publisher import MERGE_REQUEST_FILE
 ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
 PIPELINE_IN_URL = re.compile(r"/-/pipelines/(\d+)")
 STAGES = ("triage", "diagnosis", "fixer", "reviewer")
-web_owners: dict[str, tuple[str, str]] = {}
+WEB_OWNER_FILE = ".web-owner.json"
 
 
 def access_owner(code: str) -> str | None:
@@ -56,13 +56,42 @@ def parse_project_url(address: str) -> tuple[str, str, int | None]:
     return f"https://{parts.netloc}", "/".join(segments), pipeline_id
 
 
-def web_owner(run_id: str) -> str:
-    """Return the GitLab URL of a web run; 404 unless the X-Run-Key header is the key given when it started."""
+def register_web_owner(run_id: str, gitlab_url: str, run_key: str, store: Any) -> None:
+    """Persist web-run authorization in the shared run directory.
+
+    Gunicorn may serve consecutive requests from different worker processes, so
+    ownership cannot live in a process-local dictionary. Only a SHA-256 hash of
+    the run key is stored; the plaintext key is returned to the browser once.
+    """
+    folder = store.folder(run_id)
+    if folder is None:
+        raise ValueError(f"Invalid run id: {run_id}")
+    folder.mkdir(parents=True, exist_ok=True)
+    payload = {"gitlab_url": gitlab_url, "run_key_hash": secret_hash(run_key)}
+    target = folder / WEB_OWNER_FILE
+    temporary = folder / f"{WEB_OWNER_FILE}.tmp"
+    temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    temporary.replace(target)
+
+
+def web_owner(run_id: str, store: Any) -> str:
+    """Return the GitLab URL of a web run after validating its X-Run-Key header."""
+    folder = store.folder(run_id)
+    target = folder / WEB_OWNER_FILE if folder is not None else None
+    try:
+        owner = json.loads(target.read_text(encoding="utf-8")) if target is not None else None
+    except (OSError, ValueError, TypeError):
+        owner = None
+
     key = request.headers.get("X-Run-Key", "")
-    owner = web_owners.get(run_id)
-    if owner is None or not hmac.compare_digest(owner[1], secret_hash(key)):
+    if (
+        not isinstance(owner, dict)
+        or not isinstance(owner.get("gitlab_url"), str)
+        or not isinstance(owner.get("run_key_hash"), str)
+        or not hmac.compare_digest(owner["run_key_hash"], secret_hash(key))
+    ):
         abort(404, description=f"Unknown run: {run_id}")
-    return owner[0]
+    return owner["gitlab_url"]
 
 
 def stage_states(events: list[dict[str, Any]], finished: bool) -> list[dict[str, str]]:

@@ -40,9 +40,9 @@ from web_support import (
     access_owner,
     parse_project_url,
     published_merge_request,
+    register_web_owner,
     stage_states,
     web_owner,
-    web_owners,
 )
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
@@ -126,7 +126,9 @@ def create_run() -> tuple[Response, int]:
     if not project:
         abort(400, description='"project" is required.')
     pipeline_id = body.get("pipeline_id")
-    if pipeline_id is not None and (not isinstance(pipeline_id, int) or pipeline_id < 1):
+    if pipeline_id is not None and (
+        isinstance(pipeline_id, bool) or not isinstance(pipeline_id, int) or pipeline_id < 1
+    ):
         abort(400, description='"pipeline_id" must be a positive integer.')
     apply = body.get("apply", False)
     if not isinstance(apply, bool):
@@ -199,7 +201,11 @@ def gitlab_webhook() -> tuple[Response, int]:
     if reason:
         return jsonify({"status": "ignored", "reason": reason}), 202
     project = str((event.get("project") or {}).get("path_with_namespace", ""))
-    pipeline_id = int(attributes.get("id", 0))
+    raw_pipeline_id = attributes.get("id", 0)
+    try:
+        pipeline_id = int(raw_pipeline_id)
+    except (TypeError, ValueError):
+        abort(400, description="Project or pipeline id missing.")
     if not project or pipeline_id < 1:
         abort(400, description="Project or pipeline id missing.")
     try:
@@ -251,8 +257,10 @@ def create_web_run() -> tuple[Response, int]:
         gitlab_url, project, pipeline_in_url = parse_project_url(address)
     except ValueError as error:
         abort(400, description=str(error))
-    pipeline_id = body.get("pipeline_id") or pipeline_in_url
-    if pipeline_id is not None and (not isinstance(pipeline_id, int) or pipeline_id < 1):
+    pipeline_id = body.get("pipeline_id") if "pipeline_id" in body else pipeline_in_url
+    if pipeline_id is not None and (
+        isinstance(pipeline_id, bool) or not isinstance(pipeline_id, int) or pipeline_id < 1
+    ):
         abort(400, description="The pipeline number must be a positive number.")
     try:
         GitLabClient(gitlab_url, gitlab_token).get_project(project)
@@ -267,7 +275,7 @@ def create_web_run() -> tuple[Response, int]:
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     run_key = secrets.token_urlsafe(32)
-    web_owners[run_id] = (gitlab_url, secret_hash(run_key))
+    register_web_owner(run_id, gitlab_url, run_key, services.store)
     # The name only, never the code.
     RunJournal(services.store.runs_dir, run_id, verbose=False).log("web", "visitor", {"name": visitor})
     return jsonify({"run_id": run_id, "run_key": run_key, "project": project}), 202
@@ -276,7 +284,7 @@ def create_web_run() -> tuple[Response, int]:
 @app.get("/web/runs/<run_id>")
 def get_web_run(run_id: str) -> Response:
     """Status (then report), state of each agent, last tool calls and patch of a web run."""
-    web_owner(run_id)
+    web_owner(run_id, services.store)
     run = services.store.get_run(run_id)
     finished = run is not None and run.get("status") not in ("queued", "running")
     events = services.store.events(run_id) or []
@@ -301,7 +309,7 @@ def get_web_run(run_id: str) -> Response:
 @app.post("/web/runs/<run_id>/publish")
 def publish_web_run(run_id: str) -> Response:
     """Publish the fix shown to the visitor as a draft merge request; needs a token with the api scope."""
-    gitlab_url = web_owner(run_id)
+    gitlab_url = web_owner(run_id, services.store)
     gitlab_token = request.headers.get("X-Gitlab-Token", "").strip()
     if not gitlab_token:
         abort(400, description="Creating the merge request needs an access token with the api scope.")
