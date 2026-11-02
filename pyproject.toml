@@ -14,6 +14,7 @@ dependencies = [
     "gunicorn>=23",
     "redis>=5",
     "rq>=2",
+    "pyflakes>=3,<4",
 ]
 
 [project.optional-dependencies]
@@ -56,3 +57,7 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 pythonpath = [".", "src", "tests"]
 testpaths = ["tests"]
+
+[[tool.mypy.overrides]]
+module = ["pyflakes.*"]
+ignore_missing_imports = true

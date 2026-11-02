@@ -26,7 +26,7 @@ from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
 from tools.registry import ToolRegistry
 from tools.tool import Tool
-from workflow_analysis.pipeline_selection import find_pipeline, refusal_status
+from workflow_analysis.pipeline_selection import find_pipeline, origin_pipeline_id, refusal_status
 from workflow_analysis.policy_check import STATUS_BLOCKED, check_project_policy
 from workflow_analysis.remediation_round import RemediationRound
 from workflow_publication.failure_notifier import FailureNotifier
@@ -111,7 +111,12 @@ class RemediationWorkflow:
         return self.finish(project, report)
 
     def run_saved_fix(
-        self, project: str, pipeline: dict[str, Any], first_result: RoundResult, branch: str
+        self,
+        project: str,
+        pipeline: dict[str, Any],
+        first_result: RoundResult,
+        branch: str,
+        start: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Publish a fix approved in an earlier dry run, then keep fixing until the pipeline passes.
 
@@ -121,8 +126,8 @@ class RemediationWorkflow:
         report = self.new_report(project)
         report["pipeline"] = {"id": pipeline.get("id"), "branch": pipeline.get("ref"), "url": pipeline.get("web_url")}
         report["fix_branch"] = branch
-        start = {"project": project, "pipeline_id": pipeline.get("id"), "saved_fix": True}
-        self.journal.log("workflow", "start", start)
+        started = {"project": project, "pipeline_id": pipeline.get("id"), "saved_fix": True}
+        self.journal.log("workflow", "start", started)
         try:
             decision = check_project_policy(self.platform, self.policy, self.agents.values(), project, self.journal)
             if not decision.allowed:
@@ -130,7 +135,7 @@ class RemediationWorkflow:
                 report["status"] = STATUS_BLOCKED
             else:
                 report["status"] = self.run_rounds(
-                    project, pipeline, decision.allow_research, report, first_result=first_result
+                    project, pipeline, decision.allow_research, report, first_result=first_result, start=start
                 )
         except ConnectorError as error:
             report["status"] = "error"
@@ -159,6 +164,9 @@ class RemediationWorkflow:
         refusal: str | None = refusal_status(pipeline)
         if refusal is not None:
             return refusal
+        origin_id = origin_pipeline_id(str(pipeline.get("ref", "")))
+        if origin_id is not None:
+            return self.resume_fix_branch(project, pipeline, origin_id, decision.allow_research, report)
         original_branch = fix_branch_name(int(pipeline["id"]))
         existing = self.platform.find_merge_request(project, original_branch)
         branch = (
@@ -180,6 +188,34 @@ class RemediationWorkflow:
             )
         return self.run_rounds(project, pipeline, decision.allow_research, report)
 
+    def resume_fix_branch(
+        self,
+        project: str,
+        pipeline: dict[str, Any],
+        origin_id: int,
+        allow_research: bool,
+        report: dict[str, Any],
+    ) -> str:
+        """Go on fixing a PipeFix branch whose pipeline still fails, instead of starting from scratch.
+
+        The new commits go on the same branch; the merge request targets the branch of the
+        pipeline the fix branch was made for.
+        """
+        branch = str(pipeline.get("ref", ""))
+        origin = self.platform.get_pipeline(project, origin_id)
+        report["fix_branch"] = branch
+        report["resumed_from"] = {"pipeline": pipeline.get("id"), "url": pipeline.get("web_url")}
+        report["target"] = {"id": origin.get("id"), "branch": origin.get("ref")}
+        # Someone pushed to the branch after this pipeline: the fix would be built on old files.
+        if self.platform.branch_head(project, branch) != str(pipeline.get("sha", "")):
+            report["error"] = (
+                f"The branch {branch} has newer commits than pipeline #{pipeline.get('id')}: "
+                "analyse the latest pipeline of the branch."
+            )
+            return "fix_branch_moved"
+        self.journal.log("workflow", "resume", {"branch": branch, "pipeline": pipeline.get("id"), "origin": origin_id})
+        return self.run_rounds(project, origin, allow_research, report, start=pipeline)
+
     def run_rounds(
         self,
         project: str,
@@ -187,14 +223,17 @@ class RemediationWorkflow:
         allow_research: bool,
         report: dict[str, Any],
         first_result: RoundResult | None = None,
+        start: dict[str, Any] | None = None,
     ) -> str:
         """Accumulate corrections on one branch; open a draft MR only after CI succeeds.
 
         With WAIT_FOR_PIPELINE disabled we retain the original single-fix workflow.
         Every wait is pinned to the SHA returned by GitLab, not just the branch.
+        pipeline: the pipeline of the target branch, whose branch the merge request goes to.
         first_result: the fix of round 1 when it was already approved (web page), so the agents are not run again.
+        start: the pipeline analysed first, when it is not `pipeline` (a fix branch being resumed).
         """
-        current = pipeline
+        current = start or pipeline
         branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"]), self.journal.run_id))
         seen_failures: set[tuple[str, ...]] = set()
         last_result: RoundResult | None = None
@@ -227,7 +266,7 @@ class RemediationWorkflow:
                 report["validation"] = {"verified": False, "reason": "dry_run"}
                 self.journal.write_text(
                     SAVED_FIX_FILE,
-                    json.dumps({"pipeline": pipeline, "files": result.files, "branch": branch}),
+                    json.dumps({"pipeline": pipeline, "start": current, "files": result.files, "branch": branch}),
                 )
                 return "dry_run_patch_ready"
 

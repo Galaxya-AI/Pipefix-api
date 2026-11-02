@@ -59,7 +59,9 @@ def test_fix_until_green_starts_one_loop_followed_with_the_same_key(
     app_module = sys.modules["app"]
     tokens: list[str] = []
 
-    def loop_function(url: str, token: str, tools: Any, pipeline: Any, first_result: Any, branch: str) -> Any:
+    def loop_function(
+        url: str, token: str, tools: Any, pipeline: Any, first_result: Any, branch: str, start: Any = None
+    ) -> Any:
         tokens.append(token)
         return fake_loop
 

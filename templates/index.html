@@ -229,6 +229,8 @@ const VERDICTS = {
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],
   error: ["The analysis stopped with an error", "bad"],
   pipeline_fixed: ["The pipeline passes: the draft merge request is open", "ok"],
+  fix_branch_moved: ["The fix branch has newer commits: analyse its latest pipeline", "warn"],
+  fix_branch_ignored: ["This pipeline ran on a branch PipeFix cannot resume: give the pipeline of the original branch", "warn"],
   max_rounds_reached: ["Round limit reached before a green pipeline: the fixes so far are on the branch", "warn"],
   repeated_failure: ["The same errors came back after a fix: a human review is needed", "warn"],
   pipeline_timeout: ["GitLab did not finish the pipeline in time", "warn"],
