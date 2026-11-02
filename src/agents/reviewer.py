@@ -54,6 +54,10 @@ Check:
 4. Scope: no unrelated change; no secret added. Changes that fix the several causes listed
    in the diagnosis are in scope: do not reject a fix because it covers more than one error.
 5. Syntax: is the changed code valid (indentation, parentheses, imports)? Re-read the full file if needed.
+6. Imports: when the diff removes or changes an import, search_code for the name; reject the
+   diff if the name is still used (also through globals(), getattr, importlib or a side effect)
+   or if another failed job reports a NameError or ImportError about it.
+7. All the failed jobs: the diff must not fix one job (e.g. lint) by breaking another (e.g. tests).
 
 Rules:
 - Approve a minimal and correct fix; reject it if there is a serious doubt,
