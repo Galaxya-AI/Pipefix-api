@@ -7,6 +7,7 @@ avoid loops), or without a branch to fix (merge request or tag pipelines).
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from workflow_remediation.ports import CodePlatform
@@ -41,13 +42,25 @@ def find_pipeline(platform: CodePlatform, project: str, pipeline_id: int | None)
     return latest_failed_pipeline(platform, project)
 
 
+def origin_pipeline_id(branch: str) -> int | None:
+    """Return the number of the pipeline a fix branch was made for (auto-fix/pipeline-42-...), or None."""
+    if not branch.startswith(FIX_BRANCH_PREFIX):
+        return None
+    found = re.match(r"pipeline-(\d+)(?:-|$)", branch[len(FIX_BRANCH_PREFIX) :])
+    return int(found.group(1)) if found else None
+
+
 def refusal_status(pipeline: dict[str, Any]) -> str | None:
-    """Return why a pipeline is not processed, or None for a failed pipeline on an ordinary branch."""
+    """Return why a pipeline is not processed, or None for a failed pipeline on an ordinary branch.
+
+    A failed pipeline of a PipeFix fix branch is accepted when it is asked for by number: the
+    analysis then resumes on that branch. It is never chosen automatically (latest_failed_pipeline)
+    nor by the webhook, to avoid loops.
+    """
     branch = str(pipeline.get("ref", ""))
     if pipeline.get("status") != "failed":
         return f"pipeline_{pipeline.get('status')}"
-    # Never process the system's own branches, to avoid loops
-    if branch.startswith(FIX_BRANCH_PREFIX):
+    if branch.startswith(FIX_BRANCH_PREFIX) and origin_pipeline_id(branch) is None:
         return "fix_branch_ignored"
     # Merge request or tag pipeline: no branch to fix
     if branch.startswith("refs/") or pipeline.get("tag"):

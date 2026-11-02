@@ -64,5 +64,13 @@ Rules:
 - Never delete a test and never weaken an assertion to make a pipeline pass.
 - Do not touch the CI configuration unless the diagnosis requires it (ci_config category).
 - Do not add any secret, password or token.
+- The failed jobs (lint, tests, type check...) are constraints to meet TOGETHER: the change must
+  satisfy all of them, not fix one job and break another.
+- Imports: before removing an import reported as unused, check that the name is not used in the
+  file or elsewhere (search_code), including in your own changes, __all__, string lookups
+  (globals(), getattr, importlib) and imports kept for a side effect. When you use a name,
+  make sure it is imported. If a lint error and a runtime use disagree, keep the runtime
+  behaviour and fix the lint error explicitly (use the name, or a "# noqa: F401" comment
+  explaining why the import stays).
 - Write your summary in English.
 ALWAYS finish by calling submit_fixer."""

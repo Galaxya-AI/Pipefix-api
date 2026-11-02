@@ -76,8 +76,20 @@ class Publisher:
         return merge_request
 
 
+def saved_start_pipeline(journal: RunJournal) -> dict[str, Any] | None:
+    """Return the pipeline analysed by a dry run when it is not the target one (a fix branch resumed), else None."""
+    path = journal.folder / SAVED_FIX_FILE
+    if not path.is_file():
+        return None
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    start = saved.get("start")
+    if not isinstance(start, dict) or start.get("id") == saved["pipeline"].get("id"):
+        return None
+    return start
+
+
 def load_saved_fix(journal: RunJournal, report: dict[str, Any]) -> tuple[dict[str, Any], RoundResult, str]:
-    """Return the analysed pipeline, the approved fix and the fix branch of a finished dry run."""
+    """Return the target pipeline, the approved fix and the fix branch of a finished dry run."""
     saved = json.loads((journal.folder / SAVED_FIX_FILE).read_text(encoding="utf-8"))
     pipeline: dict[str, Any] = saved["pipeline"]
     last = report["rounds"][-1]
@@ -104,6 +116,7 @@ def publish_saved_fix(platform: CodePlatform, journal: RunJournal, report: dict[
     target_branch = str(pipeline.get("ref", ""))
     analysed_sha = str(pipeline.get("sha", ""))
     publisher = Publisher(platform, journal)
+    # A resumed fix branch already exists: the fix goes on top of it.
     start_sha = None if platform.branch_exists(project, branch) else analysed_sha
     publisher.commit(project, branch, result, start_sha=start_sha)
     base_moved = platform.branch_head(project, target_branch) != analysed_sha

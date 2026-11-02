@@ -108,6 +108,7 @@ def build_user_loop_function(
     pipeline: dict[str, Any],
     first_result: RoundResult,
     branch: str,
+    start: dict[str, Any] | None = None,
 ) -> RunFunction:
     """Run function of the web button "fix until the pipeline passes".
 
@@ -124,7 +125,7 @@ def build_user_loop_function(
         workflow = RemediationWorkflow(
             client, llm, agents, run_tools, journal, dry_run=False, wait_for_pipeline=True
         )
-        return workflow.run_saved_fix(project, pipeline, first_result, branch)
+        return workflow.run_saved_fix(project, pipeline, first_result, branch, start=start)
 
     return run_loop
 

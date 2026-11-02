@@ -18,6 +18,7 @@ from agents.outputs import AgentOutput
 from agents.reviewer import ReviewOutput
 from agents.triage import TriageOutput
 from changeset.changeset import Changeset
+from changeset.static_check import added_problems
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
@@ -147,11 +148,20 @@ class RemediationRound:
                 result.status = "no_change_proposed"
                 return
             result.diff = changeset.diff()
+            # Errors a static check finds (e.g. a name used after its import was removed) go back
+            # to the fixer at once: the reviewer is not asked to approve a change that cannot run.
+            problems = added_problems(changeset.files)
+            if problems:
+                self.journal.log("remediation_round", "static_check_failed", {"attempt": attempt, "problems": problems})
+                issues = [f"Static check (pyflakes) of the proposed change: {problem}" for problem in problems]
+                result.error = "; ".join(problems)
+                continue
             result.review = self.run_agent("reviewer", review_task(context, diagnosis, result.fix, result.diff), result)
             if result.review is None:
                 return
             if next_step(result.review) == STEP_PUBLISH:
                 result.status = "fix_ready"
+                result.error = ""
                 result.files = changeset.changed_files()
                 return
             issues = list(result.review.issues) if isinstance(result.review, ReviewOutput) else []

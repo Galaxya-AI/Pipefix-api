@@ -50,7 +50,7 @@ from web_support import (
     web_owner,
     web_owners,
 )
-from workflow_publication.publisher import MERGE_REQUEST_FILE, load_saved_fix, publish_saved_fix
+from workflow_publication.publisher import MERGE_REQUEST_FILE, load_saved_fix, publish_saved_fix, saved_start_pipeline
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
@@ -346,7 +346,10 @@ def fix_web_run_until_green(run_id: str) -> Response:
         client.get_project(project)
     except ConnectorError as error:
         abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
-    run_function = build_user_loop_function(gitlab_url, gitlab_token, services.tools, pipeline, first_result, branch)
+    start = saved_start_pipeline(journal)
+    run_function = build_user_loop_function(
+        gitlab_url, gitlab_token, services.tools, pipeline, first_result, branch, start
+    )
     launcher = ThreadLauncher(run_function, services.store)
     loop_id = launcher.launch(project, int(pipeline["id"]), dry_run=False)
     # The visitor follows the loop with the key of the analysis.
