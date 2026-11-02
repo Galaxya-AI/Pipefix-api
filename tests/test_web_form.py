@@ -207,8 +207,12 @@ def test_unknown_pipeline_is_named(client: FlaskClient, monkeypatch: pytest.Monk
     assert "#42 does not exist in the project g/app" in response.get_json()["message"]
 
 
-def test_agent_failure_reason_stays_out_of_the_page(client: FlaskClient) -> None:
+def test_agent_failure_shows_only_a_known_limit(client: FlaskClient) -> None:
     view = sys.modules["app"].public_run(
         {"status": "diagnosis_failed", "rounds": [{"error": "Agent 'diagnosis' reached its turn limit (10)."}]}
     )
-    assert "turn limit" not in str(view)
+    assert "AGENT_MAX_TURNS" in str(view)
+    other = sys.modules["app"].public_run(
+        {"status": "diagnosis_failed", "rounds": [{"error": "KeyError 'x' in /app/src/agent_runner.py line 9"}]}
+    )
+    assert "agent_runner" not in str(other)
