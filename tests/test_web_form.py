@@ -74,7 +74,7 @@ def test_bad_project_address_is_refused(client: FlaskClient, address: str) -> No
     assert response.status_code == 400
 
 
-def test_public_project_runs_without_token_and_only_the_key_reads_it(
+def test_the_run_uses_the_visitor_token_and_only_the_key_reads_it(
     client: FlaskClient, services: ApiServices, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     used: list[tuple[str, str, bool]] = []
@@ -90,12 +90,13 @@ def test_public_project_runs_without_token_and_only_the_key_reads_it(
     monkeypatch.setattr(app_module, "build_user_run_function", user_run_function)
     monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
     response = client.post(
-        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.example/group/app"}
+        "/web/runs",
+        json={"access_code": "good-code", "project_url": "https://gitlab.example/group/app", "gitlab_token": "t"},
     )
     assert response.status_code == 202
     answer = response.get_json()
     wait_for_runs()
-    assert used == [("https://gitlab.example", "", True)]
+    assert used == [("https://gitlab.example", "t", True)]
     assert answer["project"] == "group/app"
     run = client.get(f"/web/runs/{answer['run_id']}", headers={"X-Run-Key": answer["run_key"]}).get_json()
     assert run["run"]["status"] == "dry_run_patch_ready"
@@ -103,16 +104,14 @@ def test_public_project_runs_without_token_and_only_the_key_reads_it(
     assert answer["run_key"] not in str(services.store.get_run(answer["run_id"]))
 
 
-def test_private_project_without_token_gets_a_clear_message(
-    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_gitlab_token_is_required(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(self: Any, project: str) -> Any:
         raise ConnectorError("404 Not Found", 404)
 
     monkeypatch.setattr(sys.modules["app"].GitLabClient, "get_project", refuse)
     response = client.post("/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"})
     assert response.status_code == 400
-    assert "read_api" in response.get_json()["message"]
+    assert "A GitLab access token is required" in response.get_json()["message"]
     with_token = client.post(
         "/web/runs",
         json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "gitlab_token": "bad"},
@@ -130,7 +129,7 @@ def test_publish_needs_a_token(client: FlaskClient, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: fake_run)
     monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
     answer = client.post(
-        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"}
+        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "gitlab_token": "t"}
     ).get_json()
     wait_for_runs()
     response = client.post(f"/web/runs/{answer['run_id']}/publish", headers={"X-Run-Key": answer["run_key"]})
@@ -163,7 +162,7 @@ def test_web_run_shows_no_internal_detail(
     monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: run_with_tools)
     monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
     answer = client.post(
-        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"}
+        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "gitlab_token": "t"}
     ).get_json()
     wait_for_runs()
     body = client.get(f"/web/runs/{answer['run_id']}", headers={"X-Run-Key": answer["run_key"]}).get_data(as_text=True)
@@ -178,7 +177,12 @@ def start_with_number(client: FlaskClient, monkeypatch: pytest.MonkeyPatch, numb
     monkeypatch.setattr(app_module.GitLabClient, "get_pipeline", pipeline)
     return client.post(
         "/web/runs",
-        json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "pipeline_id": number},
+        json={
+            "access_code": "good-code",
+            "project_url": "https://gitlab.com/g/app",
+            "gitlab_token": "t",
+            "pipeline_id": number,
+        },
     )
 
 
@@ -258,7 +262,7 @@ def test_a_visitor_gets_a_clear_message_after_the_daily_limit(
     monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: fake_run)
     monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
     monkeypatch.setattr(app_module.daily_limit, "limit", 1)
-    body = {"access_code": "good-code", "project_url": "https://gitlab.com/group/app"}
+    body = {"access_code": "good-code", "project_url": "https://gitlab.com/group/app", "gitlab_token": "t"}
     assert client.post("/web/runs", json=body).status_code == 202
     wait_for_runs()
     refused = client.post("/web/runs", json=body)

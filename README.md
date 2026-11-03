@@ -36,11 +36,11 @@ Open http://localhost:8000 and enter your access code (given by the owner; with 
 the page has an "Ask for one by email" link) and the
 project address as shown in your browser, for example `https://gitlab.com/group/my-project`
 (gitlab.com or a self-hosted GitLab; a pipeline page address also gives the pipeline number).
-Optionally add a pipeline number (by default the latest failed pipeline) and a GitLab access token:
+Optionally add a pipeline number (by default the latest failed pipeline). A GitLab access token is required:
 
-- no token is needed to analyse a public project whose pipelines are public;
-- a private project needs a token with the `read_api` scope;
-- creating the merge request needs a token with the `api` scope (asked for at that moment if it was left empty).
+- the `read_api` scope is enough to analyse;
+- creating the merge request or fixing until the pipeline passes needs the `api` scope (asked for at that moment
+  if the token has only `read_api`).
 
 On a free GitLab.com account, project access tokens are not available: use a personal access token
 (Preferences, Access tokens). The token is used for that run only and never stored.

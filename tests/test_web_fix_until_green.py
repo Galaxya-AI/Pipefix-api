@@ -23,9 +23,8 @@ def start_analysis(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> dict
     app_module = sys.modules["app"]
     monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: fake_run)
     monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
-    answer: dict[str, Any] = client.post(
-        "/web/runs", json={"access_code": "good-code", "project_url": "https://gitlab.com/g/app"}
-    ).get_json()
+    body = {"access_code": "good-code", "project_url": "https://gitlab.com/g/app", "gitlab_token": "t"}
+    answer: dict[str, Any] = client.post("/web/runs", json=body).get_json()
     wait_for_runs()
     return answer
 

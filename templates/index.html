@@ -179,8 +179,8 @@
         <input id="pipeline" inputmode="numeric" placeholder="Pipeline # (optional)"></div>
       <div class="field f-access"><label class="sr" for="access">Access code</label>
         <input id="access" type="password" autocomplete="off" placeholder="Access code" required></div>
-      <div class="field f-token"><label class="sr" for="token">GitLab access token (optional)</label>
-        <input id="token" type="password" autocomplete="off" placeholder="GitLab token (optional)"></div>
+      <div class="field f-token"><label class="sr" for="token">GitLab access token</label>
+        <input id="token" type="password" autocomplete="off" placeholder="GitLab token" required></div>
       <button class="ghost help-btn" id="help-toggle" type="button" aria-expanded="false" aria-controls="help">
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.3 6.2a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9" fill="currentColor"/></svg>
         Help</button>
@@ -197,7 +197,7 @@
         <dt>Project</dt><dd>The address of a GitLab project, on gitlab.com or a self-hosted GitLab. The address of a pipeline page also gives its number.</dd>
         <dt>Pipeline</dt><dd>Optional. Empty: PipeFix takes the latest failed pipeline of the project.</dd>
         <dt>Access code</dt><dd>Given to you by the owner of PipeFix.{% if access_request_email %} <a href="{{ ask_href }}">Ask for one by email</a>.{% endif %}</dd>
-        <dt>GitLab token</dt><dd>Not needed for a public project. A private project needs the read_api scope, and publishing a fix needs the api scope. Used for this run only, never stored.</dd>
+        <dt>GitLab token</dt><dd>Required. A personal access token of your GitLab account (Preferences, Access tokens): the read_api scope to analyse, the api scope to publish the fix. Used for this run only, never stored.</dd>
       </dl>
       <h2>The buttons after an analysis</h2>
       <dl>

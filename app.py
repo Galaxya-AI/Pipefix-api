@@ -242,8 +242,8 @@ def index() -> str:
 def create_web_run() -> tuple[Response, int]:
     """Start a dry run on the visitor's project; nothing is published.
 
-    JSON body: {"access_code", "project_url", "gitlab_token" (optional), "pipeline_id" (optional)}.
-    The token is optional: a public project whose pipelines are public is read anonymously. It is used for this
+    JSON body: {"access_code", "project_url", "gitlab_token", "pipeline_id" (optional)}.
+    The token is required (read_api to analyse, api to publish the fix). It is used for this
     run only and never stored. The answer carries a run key the page sends back to read or publish the run.
     """
     body = request.get_json(silent=True)
@@ -260,18 +260,18 @@ def create_web_run() -> tuple[Response, int]:
         gitlab_url, project, pipeline_in_url = parse_project_url(address)
     except ValueError as error:
         abort(400, description=str(error))
+    if not gitlab_token:
+        abort(
+            400,
+            description="A GitLab access token is required: "
+            "the read_api scope to analyse, the api scope to publish the fix.",
+        )
     pipeline_id = read_pipeline_number(body.get("pipeline_id")) or pipeline_in_url
     gitlab = GitLabClient(gitlab_url, gitlab_token)
     try:
         gitlab.get_project(project)
     except ConnectorError as error:
-        if gitlab_token:
-            abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
-        abort(
-            400,
-            description="This project cannot be read without a token: it is private or does not exist. "
-            "Add an access token with the read_api scope.",
-        )
+        abort(400, description=f"GitLab refused the token or the project (HTTP {error.status_code or 'error'}).")
     if pipeline_id is not None:
         check_pipeline_to_fix(gitlab, project, pipeline_id)
     if not daily_limit.take(visitor):
