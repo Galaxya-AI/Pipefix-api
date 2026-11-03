@@ -72,20 +72,27 @@ VOLATILE_PATTERN = re.compile(r"\bin \d+(?:\.\d+)?s\b|0x[0-9a-f]+|\b\d{4}-\d{2}-
 SUMMARY_MAX_LINES = 80
 
 
+# Lines that name the failed test or file (pytest short summary): kept first, so that the
+# assertion details ("E  ..." lines, often many per test) cannot push them out of the list.
+NAMING_LINE_PATTERN = re.compile(r"^(?:FAILED|ERROR) \S")
+
+
 def error_summary(text: str, max_lines: int = SUMMARY_MAX_LINES) -> list[str]:
-    """Return every distinct error line of a cleaned log, in order (at most max_lines).
+    """Return every distinct error line of a cleaned log (at most max_lines).
 
     The tail of a log shows the last error only; this list shows all of them,
     e.g. the 50 failed tests of a pytest run or every unused import found by ruff.
+    The lines that name a failed test ("FAILED tests/x.py::test_y - ...") come first,
+    then the other error lines, each group in the order of the log.
     """
     found: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if ERROR_LINE_PATTERN.match(stripped) and stripped not in found:
             found.append(stripped)
-            if len(found) >= max_lines:
-                break
-    return found
+    naming = [line for line in found if NAMING_LINE_PATTERN.match(line)]
+    others = [line for line in found if not NAMING_LINE_PATTERN.match(line)]
+    return [*naming, *others][: max(0, max_lines)]
 
 
 def failure_fingerprint(text: str) -> str:

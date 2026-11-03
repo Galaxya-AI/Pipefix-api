@@ -173,3 +173,15 @@ def test_saved_fix_is_committed_first_then_new_rounds_until_green(monkeypatch: p
     assert wf.publisher.commit.call_args_list[0].args[2] is first
     assert wf.publisher.commit.call_args_list[0].kwargs["start_sha"] == "analysed-sha"
     wf.publisher.open_merge_request.assert_called_once()
+
+
+def test_visitor_sees_why_an_agent_stopped() -> None:
+    from web_support import public_run
+
+    run = {"status": "reviewer_failed", "rounds": [{"error": "LLM call limit of the run reached (20)."}]}
+    shown = public_run(run)
+    assert shown is not None
+    assert "MAX_LLM_CALLS_PER_RUN" in shown["rounds"][0]["error"]
+    secret = {"status": "fixer_failed", "rounds": [{"error": "Traceback ... sk-secret-key in /app/src/x.py"}]}
+    hidden = public_run(secret)
+    assert hidden is not None and hidden["rounds"][0]["error"] is None

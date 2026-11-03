@@ -105,13 +105,23 @@ Settings (OpenShift: the `pipefix-env` secret, see `openshift/setup.env.example`
 MAX_ROUNDS=5
 WAIT_FOR_PIPELINE=true
 PIPELINE_TIMEOUT_S=900
-AGENT_MAX_TURNS=30
-MAX_LLM_CALLS_PER_RUN=200
+AGENT_MAX_TURNS=10
+MAX_LLM_CALLS_PER_RUN=50
 MAX_CONTEXT_JOBS=5
 CONTEXT_LOG_LINES=150
 ```
 
-An empty value uses the default. To see every error in one pipeline, the CI of the
+An empty value uses the default.
+
+**LLM calls.** Each answer of an agent is one LLM call, so the agents are built to answer
+in as few calls as possible: the fixer and the reviewer receive the content of the files
+(`TASK_FILE_MAX_CHARS`, `TASK_MAX_FILES`) instead of reading them; the fixer sends every
+edit in one `propose_edits` call (all applied or none) and finishes in the same answer;
+the error list puts the `FAILED tests/...` lines first, so the diagnosis sees every failed
+test and fewer rounds are needed. The journal records the calls of each round per agent
+(event `llm_calls`). `AGENT_MAX_TURNS` and `MAX_LLM_CALLS_PER_RUN` are safety limits.
+
+To see every error in one pipeline, the CI of the
 analysed project should not stop at the first one, for example:
 `python -m pytest -rfE --continue-on-collection-errors` and a separate `ruff check` job
 in the same stage.

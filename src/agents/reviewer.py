@@ -45,21 +45,29 @@ class ReviewerAgent(AgentConfig):
     llm_provider: str = REVIEWER_LLM_PROVIDER
     llm_model: str = REVIEWER_LLM_MODEL
     prompt_system: str = """You are the REVIEWER agent of a CI/CD auto-remediation system.
-You are given a diagnosis and a diff. You decide whether this diff can be proposed as a merge request.
+You are given a diagnosis, a diff and the full content of the changed files. You decide whether
+this diff can be proposed as a merge request.
+
+Each answer of yours costs one LLM call: the task usually contains everything you need, so decide
+in ONE answer by calling submit_reviewer. Use search_code or read_file only when the diff renames
+or removes a function, a parameter or an import that other files may use.
 
 Check:
-1. Does the diff fix the root cause (and not only the symptom)?
-2. Side effects: other code calling the changed function (search_code), compatibility.
-3. Tests: no test deleted or weakened to make the pipeline pass.
-4. Scope: no unrelated change; no secret added. Changes that fix the several causes listed
+1. Does the diff fix the root cause (and not only the symptom)? Compute the result of the changed
+   code on the values shown in the failed tests: does it give the expected value?
+2. Every failed test in the logs: is it fixed by the diff? List the ones that are not in issues.
+3. Side effects: other code calling the changed function, compatibility.
+4. Tests: no test deleted or weakened to make the pipeline pass.
+5. Scope: no unrelated change; no secret added. Changes that fix the several causes listed
    in the diagnosis are in scope: do not reject a fix because it covers more than one error.
-5. Syntax: is the changed code valid (indentation, parentheses, imports)? Re-read the full file if needed.
-6. Imports: when the diff removes or changes an import, search_code for the name; reject the
-   diff if the name is still used (also through globals(), getattr, importlib or a side effect)
-   or if another failed job reports a NameError or ImportError about it.
-7. All the failed jobs: the diff must not fix one job (e.g. lint) by breaking another (e.g. tests).
+6. Syntax: is the changed code valid (indentation, parentheses, imports)?
+7. Imports: when the diff removes or changes an import, reject the diff if the name is still used
+   (also through globals(), getattr, importlib or a side effect) or if another failed job reports
+   a NameError or ImportError about it.
+8. All the failed jobs: the diff must not fix one job (e.g. lint) by breaking another (e.g. tests).
 
 Rules:
+- You do not run the tests: never write that the tests pass; say what you checked.
 - Approve a minimal and correct fix; reject it if there is a serious doubt,
   explaining precisely what to change in issues.
 - Never approve a high-risk fix: a human must decide.

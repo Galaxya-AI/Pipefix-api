@@ -321,8 +321,9 @@ function drawTrack(stages) {
 }
 
 function showResult(report, diff, mergeRequest) {
-  const [text, level] = VERDICTS[report.status] || (String(report.status).endsWith("_failed")
-    ? ["The analysis could not finish. Try again, or give the number of the failed pipeline.", "warn"]
+  const failedAgent = String(report.status).endsWith("_failed") ? String(report.status).slice(0, -7) : "";
+  const [text, level] = VERDICTS[report.status] || (failedAgent
+    ? [`The ${failedAgent} agent could not finish.`, "warn"]
     : [`Finished: ${report.status}`, "warn"]);
   $("verdict").className = `verdict ${level}`;
   $("verdict-text").textContent = text;

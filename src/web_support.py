@@ -98,6 +98,33 @@ def web_owner(run_id: str) -> str:
     return owner[0]
 
 
+def agent_failure_reason(error: str) -> str | None:
+    """A short reason the visitor can act on when an agent could not finish, or None.
+
+    Only the known limits are shown; any other error text stays in the developers' logs.
+    """
+    if not error:
+        return None
+    found = re.search(r"LLM call limit of the run reached \((\d+)\)", error)
+    if found:
+        return (
+            f"The run used all its LLM calls ({found.group(1)}). "
+            "Raise MAX_LLM_CALLS_PER_RUN in the settings, then restart PipeFix."
+        )
+    found = re.search(r"Agent '(\w+)' reached its turn limit \((\d+)\)", error)
+    if found:
+        return (
+            f"The {found.group(1)} agent reached its turn limit ({found.group(2)}). "
+            "Raise AGENT_MAX_TURNS in the settings, then restart PipeFix."
+        )
+    found = re.search(r"Agent '(\w+)' gave \d+ invalid final answers", error)
+    if found:
+        return f"The {found.group(1)} agent did not give a valid answer. Try again."
+    if error.startswith("LLM call failed"):
+        return "The LLM provider did not answer (network, API key or quota). Try again later."
+    return None
+
+
 def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
     """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
     if run is None:
@@ -110,8 +137,10 @@ def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
         },
         "fix": {"summary": (last.get("fix") or {}).get("summary")},
         "review": {"comment": (last.get("review") or {}).get("comment")},
-        # An agent that could not finish: the reason is for the developers' logs, not for the visitor.
-        "error": None if str(run.get("status", "")).endswith("_failed") else last.get("error"),
+        # An agent that could not finish: only a known limit is shown; other details stay in the logs.
+        "error": agent_failure_reason(str(last.get("error") or ""))
+        if str(run.get("status", "")).endswith("_failed")
+        else last.get("error"),
     }
     keys = ("status", "project", "error", "merge_request_url", "merge_request", "fix_branch")
     view = {key: run.get(key) for key in keys if run.get(key)}
