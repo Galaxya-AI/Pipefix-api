@@ -224,6 +224,7 @@ const VERDICTS = {
   not_fixable_by_code: ["Not caused by the code: check the environment or the CI configuration", "warn"],
   infra_flaky: ["Looks temporary: retry the pipeline", "warn"],
   review_rejected: ["The reviewer rejected the proposed fix", "warn"],
+  static_check_failed: ["The proposed fix still had a Python error after every attempt: nothing was proposed", "warn"],
   no_failed_pipeline: ["Nothing to fix: no failed pipeline, or the latest pipelines of each branch passed", "ok"],
   pipeline_success: ["This pipeline passed: there is nothing to fix", "ok"],
   blocked_by_policy: ["This project is excluded by the data policy", "bad"],

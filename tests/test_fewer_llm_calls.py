@@ -194,3 +194,56 @@ def test_other_failures_still_go_to_the_triage_agent(reasons: list[str | None]) 
     jobs = [{"id": i + 1, "name": f"job{i}", "failure_reason": reason} for i, reason in enumerate(reasons)]
     assert infra_triage(jobs) is None
     assert infra_triage([]) is None
+
+
+def test_propose_edits_refuses_an_edit_that_adds_a_python_error() -> None:
+    from changeset.static_check import added_problems_with_lines
+
+    source = "from decimal import Decimal\n\n\ndef total(x):\n    return Decimal(x)\n"
+    changeset = Changeset(lambda path: source, check=added_problems_with_lines)
+    change = {
+        "path": "src/finance.py",
+        "old_text": "Decimal(x)\n",
+        "new_text": "Decimal(x).quantize(1, ROUND_HALF_UP)\n",
+    }
+    with pytest.raises(ToolError) as error:
+        changeset.propose_edits([change])
+    message = str(error.value)
+    assert "undefined name 'ROUND_HALF_UP'" in message
+    assert "5 |     return Decimal(x).quantize(1, ROUND_HALF_UP)" in message
+    assert changeset.is_empty()
+
+    fixed = {
+        "path": "src/finance.py",
+        "old_text": "from decimal import Decimal\n",
+        "new_text": "from decimal import ROUND_HALF_UP, Decimal\n",
+    }
+    changeset.propose_edits([change, fixed])
+    assert "ROUND_HALF_UP, Decimal" in changeset.current("src/finance.py")
+
+
+def test_round_says_static_check_failed_when_the_reviewer_never_ran() -> None:
+    broken = {"summary": "Broken.", "files_changed": ["src/finance.py"], "tests_modified": False}
+    changeset = Changeset(lambda path: FINANCE)
+    llm = ScriptedLLM(
+        [
+            answer(("propose_edit", edit("x * 3", "x * (")), ("submit_fixer", broken)),
+            answer(("submit_fixer", broken)),
+        ]
+    )
+    runner = AgentRunner(llm, ToolRegistry(changeset.tools()), agents())
+    remediation = RemediationRound(Mock(), runner, [], Mock(), Mock(), dry_run=True, max_fix_attempts=2)
+    result = RoundResult(pipeline_id=7)
+    result.diagnosis = DiagnosisOutput(
+        summary="Wrong factor.",
+        root_cause="double multiplies by 3",
+        files=["src/finance.py"],
+        evidence="src/finance.py:2 return x * 3",
+        fix_plan="Multiply by 2 instead of 3.",
+        confidence="high",
+    )
+    remediation.fix_and_review("context", changeset, result)
+    assert result.status == "static_check_failed"
+    assert "syntax error" in result.error and "\n" not in result.error
+    second_task = llm.calls[1][1]["content"]
+    assert "Static check (pyflakes)" in second_task and "2 |     return x * (" in second_task
