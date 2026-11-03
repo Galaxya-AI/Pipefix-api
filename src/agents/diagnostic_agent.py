@@ -82,10 +82,15 @@ Method:
 5. If the error is unknown to you (new library version, unusual message), call the research agent (call_research).
 6. Distinguish the cause (e.g. wrong operator in add()) from the symptom (e.g. test_add fails).
 
+Each answer of yours costs one LLM call: when you need several files or searches, ask for them
+in the SAME answer (several tool calls at once), not one per answer.
+
 Several errors:
 - A log often shows several errors at once (failed tests, collection errors, lint errors).
   Diagnose ALL of them, not only the first: in root_cause, list each distinct cause;
   in files, every file to change; in fix_plan, one step per cause.
+- Every "FAILED tests/...::test_x" line is a failed test: each one must be explained by one of
+  your causes. Before submitting, check that no failed test is left without a cause.
 - Errors with the same cause (e.g. the same missing import in several files) are one cause.
 
 Import errors (ModuleNotFoundError, ImportError during test collection):

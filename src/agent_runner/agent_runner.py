@@ -70,14 +70,29 @@ class AgentRunner:
                 messages.append(finish_reminder(agent.finish_tool_name))
                 continue
             output: AgentOutput | None = None
-            # Answer every call: provider APIs require one result per call
+            # Answer every call: provider APIs require one result per call.
+            # The other calls run first, so an agent can e.g. propose its edits and finish in one answer.
+            finish_calls = [call for call in response.tool_calls if call.name == agent.finish_tool_name]
+            failed = False
             for call in response.tool_calls:
-                if call.name == agent.finish_tool_name:
-                    output = self.validate_output(agent, call, messages)
-                    if output is None:
-                        invalid_answers += 1
-                else:
-                    messages.append(tool_result_message(call.id, call.name, self.run_tool(agent, call, depth)))
+                if call.name != agent.finish_tool_name:
+                    result, ok = self.run_tool_checked(agent, call, depth)
+                    # Only a failed change blocks the finish; a failed read is just information
+                    failed = failed or (not ok and self.changes_something(call.name))
+                    messages.append(tool_result_message(call.id, call.name, result))
+            for call in finish_calls:
+                if output is not None or failed:
+                    # A finish built on a failed call (e.g. an edit not applied) is not recorded
+                    reason = "another call of this answer failed" if failed else "a result is already recorded"
+                    messages.append(
+                        tool_result_message(
+                            call.id, call.name, f"Not recorded: {reason}. Fix it, then call {call.name} again."
+                        )
+                    )
+                    continue
+                output = self.validate_output(agent, call, messages)
+                if output is None:
+                    invalid_answers += 1
             if output is not None:
                 self.log(agent_name, "finish", {"turns": turn, "output": output.model_dump()})
                 return output
@@ -125,18 +140,29 @@ class AgentRunner:
         messages.append(tool_result_message(call.id, call.name, "Result recorded."))
         return output
 
+    def changes_something(self, tool_name: str) -> bool:
+        tool = self.tools.get(tool_name)
+        return tool is not None and not tool.read_only
+
     def run_tool(self, agent: AgentConfig, call: ToolCall, depth: int) -> str:
         """Run a tool or a sub-agent; errors are returned as text so the LLM can react."""
+        return self.run_tool_checked(agent, call, depth)[0]
+
+    def run_tool_checked(self, agent: AgentConfig, call: ToolCall, depth: int) -> tuple[str, bool]:
+        """Run a tool or a sub-agent; return its result text and False if it failed."""
         sub_agent = sub_agent_from_tool_name(call.name)
         if sub_agent is not None and sub_agent in agent.sub_agents:
-            return self.run_sub_agent(agent, sub_agent, call, depth)
+            # A failing sub-agent gives information, not a broken change: it does not block the finish
+            return self.run_sub_agent(agent, sub_agent, call, depth), True
+        ok = True
         try:
             result = self.tools.execute_for(agent.tool_tags, call.name, call.arguments)
         except ToolError as error:
             result = f"Error: {error}"
+            ok = False
         details = {"tool": call.name, "arguments": call.arguments, "preview": truncate(result, 300)}
         self.log(agent.agent_name, "tool_call", details)
-        return result
+        return result, ok
 
     def run_sub_agent(self, agent: AgentConfig, sub_agent: str, call: ToolCall, depth: int) -> str:
         """Output of the sub-agent as JSON, or an error text: a failing sub-agent does not stop the caller."""

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import difflib
 from collections.abc import Callable
+from typing import Any
 
 from tools.errors import ToolError
 from tools.tags import TAG_EDIT, TAG_REVIEW
@@ -64,6 +65,31 @@ class Changeset:
         self.files[path] = (original, updated)
         return unified_diff(path, content, updated)
 
+    def propose_edits(self, edits: list[dict[str, Any]]) -> str:
+        """Apply several edits in one call, all or none; return the diff of every edit.
+
+        Each edit is {"path", "old_text", "new_text"}; edits of the same file apply in order.
+        Raises ToolError naming the first edit that fails; then no edit of the call is kept.
+        """
+        if not isinstance(edits, list) or not edits:
+            raise ToolError("edits is empty: give at least one {path, old_text, new_text}.")
+        saved = dict(self.files)
+        diffs = []
+        for index, edit in enumerate(edits, start=1):
+            try:
+                if not isinstance(edit, dict) or not str(edit.get("path", "")).strip():
+                    raise ToolError("each edit needs a path, an old_text and a new_text.")
+                path = str(edit["path"]).strip()
+                diffs.append(self.propose_edit(path, str(edit.get("old_text", "")), str(edit.get("new_text", ""))))
+            except ToolError as error:
+                self.files = saved
+                shown = edit.get("path", "?") if isinstance(edit, dict) else "?"
+                raise ToolError(
+                    f"Edit {index} of {len(edits)} ({shown}): {error} "
+                    "No edit of this call was kept: send all the edits again, with this one corrected."
+                ) from error
+        return "".join(diffs)
+
     def diff(self) -> str:
         """Return the unified diff of every change, in path order (empty if nothing changed)."""
         return "".join(
@@ -91,7 +117,25 @@ class Changeset:
                 "new_text": {"type": "string", "description": "New text replacing the excerpt."},
             }
         )
+        edits_schema = object_schema(
+            {
+                "edits": {
+                    "type": "array",
+                    "description": "Every change of the fix, applied in order (several per file allowed).",
+                    "items": edit_schema,
+                }
+            }
+        )
         return [
+            Tool(
+                "propose_edits",
+                "Propose ALL the changes of the fix in one call (all applied or none). Returns the diff. "
+                "Publishes nothing: the change is reviewed.",
+                edits_schema,
+                self.propose_edits,
+                frozenset({TAG_EDIT}),
+                read_only=False,
+            ),
             Tool(
                 "propose_edit",
                 "Propose a change to a file by replacing a unique excerpt. Publishes nothing: the change is reviewed.",

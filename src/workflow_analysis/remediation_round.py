@@ -24,7 +24,7 @@ from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
 from text_tools.log_cleaning import clean_log, error_summary, keep_tail, mask_secrets, strip_ansi
 from tools.tool import Tool
-from workflow_analysis.task_messages import diagnosis_task, fix_task, pipeline_context, review_task
+from workflow_analysis.task_messages import diagnosis_task, file_contents, fix_task, pipeline_context, review_task
 from workflow_analysis.toolbox import build_run_registry
 from workflow_remediation.ports import CodePlatform
 from workflow_remediation.round_result import RoundResult
@@ -40,6 +40,10 @@ MAX_CONTEXT_JOBS = env_int("MAX_CONTEXT_JOBS", 5, minimum=1)
 
 # Error lines of each failed job shown on the web page for every round
 ERRORS_SHOWN_PER_JOB = 30
+
+# Files given in full to the fixer and the reviewer, so they do not spend LLM calls reading them
+TASK_FILE_MAX_CHARS = env_int("TASK_FILE_MAX_CHARS", 30000)
+TASK_MAX_FILES = env_int("TASK_MAX_FILES", 8, minimum=1)
 
 
 class RemediationRound:
@@ -75,6 +79,26 @@ class RemediationRound:
         return [job for job in jobs if not job.get("allow_failure")] or jobs
 
     def run(self, project: str, pipeline: dict[str, Any], allow_research: bool) -> RoundResult:
+        calls_before = self.llm_calls()
+        try:
+            return self.run_agents(project, pipeline, allow_research)
+        finally:
+            self.log_llm_calls(pipeline, calls_before)
+
+    def llm_calls(self) -> dict[str, int]:
+        """LLM calls of the run so far, per agent (empty if the runner does not count them)."""
+        calls = getattr(getattr(self.runner, "usage", None), "calls", None)
+        return dict(calls) if isinstance(calls, dict) else {}
+
+    def log_llm_calls(self, pipeline: dict[str, Any], before: dict[str, int]) -> None:
+        """Record the LLM calls of this round per agent, to see where the budget goes."""
+        after = self.llm_calls()
+        per_agent = {name: count - before.get(name, 0) for name, count in after.items() if count > before.get(name, 0)}
+        details = {"pipeline": pipeline.get("id"), "per_agent": per_agent, "round_calls": sum(per_agent.values())}
+        details["run_calls"] = sum(after.values())
+        self.journal.log("remediation_round", "llm_calls", details)
+
+    def run_agents(self, project: str, pipeline: dict[str, Any], allow_research: bool) -> RoundResult:
         result = RoundResult(pipeline_id=int(pipeline["id"]))
         jobs = self.failed_jobs(project, pipeline)
         if not jobs:
@@ -141,7 +165,9 @@ class RemediationRound:
         issues: list[str] = []
         for attempt in range(1, self.max_fix_attempts + 1):
             result.attempts = attempt
-            result.fix = self.run_agent("fixer", fix_task(context, diagnosis, issues), result)
+            paths = [*getattr(diagnosis, "files", []), *changeset.changed_files()]
+            files = file_contents(changeset.current, paths, TASK_FILE_MAX_CHARS, TASK_MAX_FILES)
+            result.fix = self.run_agent("fixer", fix_task(context, diagnosis, issues, files), result)
             if result.fix is None:
                 return
             if changeset.is_empty():
@@ -156,7 +182,9 @@ class RemediationRound:
                 issues = [f"Static check (pyflakes) of the proposed change: {problem}" for problem in problems]
                 result.error = "; ".join(problems)
                 continue
-            result.review = self.run_agent("reviewer", review_task(context, diagnosis, result.fix, result.diff), result)
+            changed = file_contents(changeset.current, changeset.changed_files(), TASK_FILE_MAX_CHARS, TASK_MAX_FILES)
+            task = review_task(context, diagnosis, result.fix, result.diff, changed)
+            result.review = self.run_agent("reviewer", task, result)
             if result.review is None:
                 return
             if next_step(result.review) == STEP_PUBLISH:
