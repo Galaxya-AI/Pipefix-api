@@ -156,3 +156,41 @@ def test_fix_task_without_files_is_unchanged() -> None:
     diagnosis = Mock()
     diagnosis.model_dump.return_value = {"summary": "s"}
     assert "Current content" not in fix_task("ctx", diagnosis, [])
+
+
+def round_with_jobs(jobs: list[dict[str, Any]]) -> tuple[RemediationRound, Mock, Mock]:
+    platform = Mock()
+    platform.pipeline_jobs.return_value = jobs
+    platform.job_trace.return_value = "ERROR: Job failed (system failure)"
+    runner = Mock()
+    journal = Mock()
+    return RemediationRound(platform, runner, [], Mock(), journal, dry_run=True), runner, journal
+
+
+def test_infrastructure_failure_given_by_gitlab_needs_no_llm_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    import workflow_analysis.remediation_round as remediation_round
+
+    monkeypatch.setattr(remediation_round, "build_run_registry", lambda *args: Mock())
+    jobs = [
+        {"id": 11, "name": "unit-tests", "failure_reason": "runner_system_failure"},
+        {"id": 12, "name": "lint", "failure_reason": "stuck_or_timeout_failure"},
+    ]
+    remediation, runner, journal = round_with_jobs(jobs)
+    result = remediation.run("group/project", {"id": 7, "sha": "abc"}, allow_research=False)
+
+    assert result.status == "infra_flaky"
+    assert result.triage is not None and result.triage.category == "infra_flaky"
+    runner.run.assert_not_called()
+    journal.log.assert_any_call("triage", "start", {"source": "gitlab_failure_reason"})
+
+
+@pytest.mark.parametrize(
+    "reasons",
+    [["script_failure"], ["runner_system_failure", "script_failure"], [None]],
+)
+def test_other_failures_still_go_to_the_triage_agent(reasons: list[str | None]) -> None:
+    from workflow_analysis.infra_failure import infra_triage
+
+    jobs = [{"id": i + 1, "name": f"job{i}", "failure_reason": reason} for i, reason in enumerate(reasons)]
+    assert infra_triage(jobs) is None
+    assert infra_triage([]) is None
