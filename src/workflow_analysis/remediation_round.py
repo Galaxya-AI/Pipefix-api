@@ -14,9 +14,12 @@ from typing import Any
 
 from agent_errors.errors import AgentRunError
 from agent_runner.agent_runner import AgentRunner
+from agents.diagnostic_agent import DiagnosisOutput
+from agents.fixer_agent import FixOutput
 from agents.outputs import AgentOutput
 from agents.reviewer import ReviewOutput
 from agents.triage import TriageOutput
+from changeset.autofix import AUTOFIX_RUFF, AutofixResult, lint_report, ruff_autofix
 from changeset.changeset import Changeset
 from changeset.static_check import added_problems_with_lines
 from journal.run_journal import RunJournal
@@ -127,6 +130,18 @@ class RemediationRound:
             logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
         self.log_errors(pipeline, jobs, traces)
         context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
+        # Lint and format errors that ruff fixes on its own cost no LLM call
+        autofix = self.autofix(changeset, jobs, traces)
+        # A fix made by ruff alone still goes through the static check, like any fix
+        if autofix.complete() and not added_problems_with_lines(changeset.files):
+            self.deterministic_fix(jobs, autofix, changeset, result)
+            return result
+        if autofix.files:
+            context += (
+                "\n\n## Already fixed automatically by ruff (no need to redo it)\n"
+                f"Files: {', '.join(sorted(autofix.files))}. The file contents you get include these fixes; "
+                "fix only the other errors."
+            )
         # The assertion alone does not show the inputs: give the code of the failed tests
         error_lines = [line for trace in traces.values() for line in error_summary(strip_ansi(trace), 200)]
         tests = failed_test_sources(changeset.current, error_lines, FAILED_TESTS_MAX_CHARS)
@@ -138,6 +153,55 @@ class RemediationRound:
             return result
         self.fix_and_review(context, changeset, result)
         return result
+
+    def autofix(self, changeset: Changeset, jobs: list[dict[str, Any]], traces: dict[int, str]) -> AutofixResult:
+        """Apply ruff's own fixes for the lint and format errors of the failed jobs."""
+        if not AUTOFIX_RUFF:
+            return AutofixResult()
+        result = ruff_autofix(changeset.current, lint_report(traces.values()))
+        for path, content in result.files.items():
+            changeset.replace_file(path, content)
+        if result.files:
+            details = {"files": sorted(result.files), "remaining": result.remaining, "complete": result.complete()}
+            self.journal.log("remediation_round", "ruff_autofix", details)
+        return result
+
+    def deterministic_fix(
+        self, jobs: list[dict[str, Any]], autofix: AutofixResult, changeset: Changeset, result: RoundResult
+    ) -> None:
+        """Fill the round as the agents would, for a fix made by ruff alone (no LLM call, no review needed)."""
+        files = sorted(autofix.files)
+        rules = ", ".join(sorted(autofix.report.codes)) or "formatting"
+        summary = f"Lint and format errors fixed by ruff ({rules})."
+        result.triage = TriageOutput(
+            summary=summary,
+            category="code_bug",
+            failed_job_id=int(jobs[0]["id"]),
+            log_excerpt=f"ruff: {rules} in {', '.join(files)}"[:2000],
+            fixable_by_code=True,
+        )
+        result.diagnosis = DiagnosisOutput(
+            summary=summary,
+            root_cause=f"The lint job reports errors that ruff can fix itself ({rules}).",
+            files=files,
+            evidence=f"ruff errors in the job log for {', '.join(files)}.",
+            fix_plan="Apply ruff check --fix (safe fixes, reported rules only) and ruff format.",
+            confidence="high",
+        )
+        result.fix = FixOutput(
+            summary="Applied ruff's own fixes; no LLM was used.",
+            files_changed=files,
+            tests_modified=any(path.startswith(("tests/", "test/")) for path in files),
+        )
+        result.review = ReviewOutput(
+            summary="Deterministic fix by ruff.",
+            approved=True,
+            risk="low",
+            comment="Made by ruff (safe fixes only, rules reported by the pipeline); the next pipeline confirms it.",
+        )
+        result.diff = changeset.diff()
+        result.files = changeset.changed_files()
+        result.status = "fix_ready"
 
     def log_errors(self, pipeline: dict[str, Any], jobs: list[dict[str, Any]], traces: dict[int, str]) -> None:
         """Record the error lines of each failed job, so the web page can show them for this round."""
