@@ -22,6 +22,7 @@ from changeset.static_check import added_problems
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
+from text_tools.failed_tests import failed_test_sources
 from text_tools.log_cleaning import clean_log, error_summary, keep_tail, mask_secrets, strip_ansi
 from tools.tool import Tool
 from workflow_analysis.infra_failure import infra_triage
@@ -41,6 +42,9 @@ MAX_CONTEXT_JOBS = env_int("MAX_CONTEXT_JOBS", 5, minimum=1)
 
 # Error lines of each failed job shown on the web page for every round
 ERRORS_SHOWN_PER_JOB = 30
+
+# Code of the failed test functions given to every agent (characters in all)
+FAILED_TESTS_MAX_CHARS = env_int("FAILED_TESTS_MAX_CHARS", 12000)
 
 # Files given in full to the fixer and the reviewer, so they do not spend LLM calls reading them
 TASK_FILE_MAX_CHARS = env_int("TASK_FILE_MAX_CHARS", 30000)
@@ -119,6 +123,11 @@ class RemediationRound:
             logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
         self.log_errors(pipeline, jobs, traces)
         context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
+        # The assertion alone does not show the inputs: give the code of the failed tests
+        error_lines = [line for trace in traces.values() for line in error_summary(strip_ansi(trace), 200)]
+        tests = failed_test_sources(changeset.current, error_lines, FAILED_TESTS_MAX_CHARS)
+        if tests:
+            context += f"\n\n## Code of the failed tests (as in the analysed commit)\n{tests}"
         if not self.analyse(project, context, result, jobs):
             return result
         self.fix_and_review(context, changeset, result)

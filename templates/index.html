@@ -454,9 +454,9 @@ async function pollLoop() {
     return;
   }
   drawTrack(data.stages);
-  drawRounds(data.rounds || []);
   const run = data.run || {};
   const status = run.status || "running";
+  drawRounds(data.rounds || [], status !== "running" && status !== "queued");
   if (status === "running" || status === "queued") {
     show("loop-status", loopProgress(data.rounds || []));
     setTimeout(pollLoop, 5000);
@@ -484,15 +484,25 @@ function link(url, text) {
   return anchor;
 }
 
-function drawRounds(rounds) {
+function roundBadge(round, finished) {
+  const result = round.result || {};
+  if (result.status === "success") return ["pipeline passed", "pass"];
+  if (result.status) return [`pipeline ${result.status}`, "fail"];
+  // The agents stopped this round without a fix (e.g. review rejected), or the run ended during it
+  if (round.status && round.status !== "fix_ready") return [`stopped: ${round.status.replaceAll("_", " ")}`, "fail"];
+  if (finished) return ["stopped", "fail"];
+  return [round.commit ? "pipeline running" : "fixing", "run"];
+}
+
+function drawRounds(rounds, finished = false) {
   $("rounds").replaceChildren(...rounds.map((round) => {
     const item = tag("li", "");
     item.className = "round";
     const title = tag("h4", `Round ${round.number}`);
     const result = round.result || {};
-    const badge = tag("span", result.status === "success" ? "pipeline passed"
-      : result.status ? `pipeline ${result.status}` : round.commit ? "pipeline running" : "fixing");
-    badge.className = `badge ${result.status === "success" ? "pass" : result.status ? "fail" : "run"}`;
+    const [badgeText, badgeLevel] = roundBadge(round, finished);
+    const badge = tag("span", badgeText);
+    badge.className = `badge ${badgeLevel}`;
     title.append(badge);
     item.append(title);
     for (const job of round.errors || []) {

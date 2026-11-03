@@ -238,7 +238,6 @@ class RemediationWorkflow:
         seen_failures: set[tuple[str, ...]] = set()
         last_result: RoundResult | None = None
         for round_number in range(1, self.max_rounds + 1):
-            self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             if self.wait_for_pipeline and not self.dry_run:
                 failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
                 traces = {
@@ -252,6 +251,8 @@ class RemediationWorkflow:
                     return "repeated_failure"
                 if signature:
                     seen_failures.add(signature)
+            # Logged after the repeated-failure check: a round that stops before any agent is not shown
+            self.journal.log("workflow", "round", {"number": round_number, "pipeline": current.get("id")})
             if round_number == 1 and first_result is not None:
                 self.remediation_round.record_errors(project, current)
                 result = first_result
