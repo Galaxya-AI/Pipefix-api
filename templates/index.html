@@ -198,7 +198,7 @@
             <input id="publish-token" type="password" autocomplete="off">
           </div>
           <p class="error" id="publish-error" role="alert" hidden></p>
-          <p class="published" id="published" hidden>Merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
+          <p class="published" id="published" hidden>Draft merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
         </div>
         <div id="loop-panel" hidden>
           <h3>Rounds</h3>
@@ -468,7 +468,16 @@ async function pollLoop() {
   $("verdict-text").textContent = text;
   const branch = run.fix_branch ? ` Fix branch: ${run.fix_branch}.` : "";
   show("loop-status", (run.error ? `${run.error}` : "Finished.") + branch);
-  if (run.merge_request) showPublished(run.merge_request);
+  if (run.merge_request) {
+    // Shown in the rounds too: this is where the visitor looks when the loop ends
+    $("loop-status").append(" Draft merge request: ", link(run.merge_request, mergeRequestLabel(run.merge_request)));
+    showPublished(run.merge_request);
+  }
+}
+
+function mergeRequestLabel(url) {
+  const number = /\/merge_requests\/(\d+)/.exec(url);
+  return number ? `!${number[1]}` : url;
 }
 
 function loopProgress(rounds) {
