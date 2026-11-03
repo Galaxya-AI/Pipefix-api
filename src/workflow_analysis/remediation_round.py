@@ -24,6 +24,7 @@ from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
 from text_tools.log_cleaning import clean_log, error_summary, keep_tail, mask_secrets, strip_ansi
 from tools.tool import Tool
+from workflow_analysis.infra_failure import infra_triage
 from workflow_analysis.task_messages import diagnosis_task, file_contents, fix_task, pipeline_context, review_task
 from workflow_analysis.toolbox import build_run_registry
 from workflow_remediation.ports import CodePlatform
@@ -118,7 +119,7 @@ class RemediationRound:
             logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
         self.log_errors(pipeline, jobs, traces)
         context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
-        if not self.analyse(project, context, result):
+        if not self.analyse(project, context, result, jobs):
             return result
         self.fix_and_review(context, changeset, result)
         return result
@@ -142,9 +143,21 @@ class RemediationRound:
         traces = {int(job["id"]): self.platform.job_trace(project, int(job["id"])) for job in jobs[:MAX_CONTEXT_JOBS]}
         self.log_errors(pipeline, jobs, traces)
 
-    def analyse(self, project: str, context: str, result: RoundResult) -> bool:
-        """Run the triage, then the diagnosis if code can fix the failure; True if a diagnosis is ready."""
-        result.triage = self.run_agent("triage", context, result)
+    def analyse(
+        self, project: str, context: str, result: RoundResult, jobs: list[dict[str, Any]] | None = None
+    ) -> bool:
+        """Run the triage, then the diagnosis if code can fix the failure; True if a diagnosis is ready.
+
+        When GitLab already says that every failed job failed for an infrastructure reason
+        (runner, timeout...), the triage result is known without an LLM call.
+        """
+        known = infra_triage(jobs or [])
+        if known is not None:
+            self.journal.log("triage", "start", {"source": "gitlab_failure_reason"})
+            self.journal.log("triage", "finish", {"source": "gitlab_failure_reason", "output": known.model_dump()})
+            result.triage = known
+        else:
+            result.triage = self.run_agent("triage", context, result)
         if result.triage is None:
             return False
         step = next_step(result.triage)
