@@ -47,7 +47,15 @@
   .primary { background: var(--accent); color: var(--accent-ink); }
   .white { background: var(--ink); color: var(--bg); }
   .ghost { background: transparent; color: var(--ink); border: 1px solid #52525b; }
-  .info { width: 42px; padding: 0; background: var(--card-2); color: var(--muted); cursor: help; }
+  .help-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; }
+  header { position: relative; }
+  .help { position: absolute; top: calc(100% + 10px); right: 0; z-index: 10; width: min(520px, 100%); max-height: 70vh; overflow-y: auto;
+          padding: 22px 24px; border-radius: 20px; background: var(--card-2); border: 1px solid var(--line);
+          box-shadow: 0 24px 60px rgba(0, 0, 0, .55); }
+  .help h2 { margin: 0 0 10px; font-size: 14px; font-weight: 800; color: var(--ink); }
+  .help h2 + dl { margin-bottom: 18px; }
+  .help dl { grid-template-columns: 130px minmax(0, 1fr); gap: 8px 14px; font-size: 13.5px; }
+  .help button { margin-top: 2px; }
   button:disabled { opacity: .5; cursor: default; }
   .error { flex-basis: 100%; margin: 0; color: var(--bad); font-size: 13.5px; overflow-wrap: anywhere; white-space: pre-wrap; text-align: right; }
 
@@ -165,11 +173,28 @@
         <input id="access" type="password" autocomplete="off" placeholder="Access code" required></div>
       <div class="field f-token"><label class="sr" for="token">GitLab access token (optional)</label>
         <input id="token" type="password" autocomplete="off" placeholder="GitLab token (optional)"></div>
-      <button class="info" type="button" aria-label="Help"
-        title="Access code: given by the owner of PipeFix.&#10;Project: gitlab.com or self-hosted; a pipeline address also gives the number.&#10;Pipeline: empty = the latest failed one.&#10;Token: not needed for a public project; read_api for a private one; api to publish. Used for this run only, never stored.">i</button>
+      <button class="ghost help-btn" id="help-toggle" type="button" aria-expanded="false" aria-controls="help">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.3 6.2a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9" fill="currentColor"/></svg>
+        Help</button>
       <button class="white" id="start" type="submit">Analyse</button>
       <p class="error" id="form-error" role="alert" hidden></p>
     </form>
+    <div class="help" id="help" role="dialog" aria-label="Help" hidden>
+      <h2>What to fill in</h2>
+      <dl>
+        <dt>Project</dt><dd>The address of a GitLab project, on gitlab.com or a self-hosted GitLab. The address of a pipeline page also gives its number.</dd>
+        <dt>Pipeline</dt><dd>Optional. Empty: PipeFix takes the latest failed pipeline of the project.</dd>
+        <dt>Access code</dt><dd>Given to you by the owner of PipeFix.</dd>
+        <dt>GitLab token</dt><dd>Not needed for a public project. A private project needs the read_api scope, and publishing a fix needs the api scope. Used for this run only, never stored.</dd>
+      </dl>
+      <h2>The buttons after an analysis</h2>
+      <dl>
+        <dt>Fix until the pipeline passes</dt><dd>Commits the fix, waits for GitLab CI and fixes the new errors round after round. The draft merge request opens only when the pipeline is green.</dd>
+        <dt>Create merge request</dt><dd>Publishes this fix alone as a draft merge request, without waiting for the pipeline.</dd>
+        <dt>Download patch</dt><dd>Nothing is written to GitLab: apply the patch yourself.</dd>
+      </dl>
+      <button class="white" id="help-close" type="button">Got it</button>
+    </div>
   </header>
 
   <div class="top">
@@ -184,9 +209,8 @@
         <p class="published" id="existing" hidden>A merge request already waits for this pipeline:
           <a id="existing-link" target="_blank" rel="noopener"></a></p>
         <div class="actions" id="actions" hidden>
-          <button class="primary" id="loop" type="button"
-            title="Commits this fix, waits for GitLab CI and fixes the new errors round after round. The draft merge request opens only when the pipeline is green.">Fix until the pipeline passes</button>
-          <button class="ghost" id="publish" type="button" title="Publishes this fix alone as a draft merge request, without waiting for the pipeline.">Create merge request</button>
+          <button class="primary" id="loop" type="button">Fix until the pipeline passes</button>
+          <button class="ghost" id="publish" type="button">Create merge request</button>
           <button class="ghost" id="download" type="button">Download patch</button>
         </div>
         <div class="token-row" id="publish-token-row" hidden>
@@ -277,6 +301,17 @@ let token = "", runId = "", runKey = "", patch = "", loopId = "";
 let roundsData = [], roundsFinished = false, pickedRound = null;
 
 drawTrack(Object.keys(STAGE_LABELS).map((name) => ({ name, state: "pending" })));
+
+// Help: a panel that opens on click and closes with the button, Escape or a click outside
+function setHelp(open) {
+  $("help").hidden = !open;
+  $("help-toggle").setAttribute("aria-expanded", String(open));
+  if (open) $("help-close").focus();
+}
+$("help-toggle").addEventListener("click", (event) => { event.stopPropagation(); setHelp($("help").hidden); });
+$("help-close").addEventListener("click", () => { setHelp(false); $("help-toggle").focus(); });
+document.addEventListener("click", (event) => { if (!$("help").hidden && !$("help").contains(event.target)) setHelp(false); });
+$("help").addEventListener("keydown", (event) => { if (event.key === "Escape") { setHelp(false); $("help-toggle").focus(); } });
 
 $("form").addEventListener("submit", async (event) => {
   event.preventDefault();
