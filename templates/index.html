@@ -6,216 +6,246 @@
 <title>PipeFix</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --paper: #f2f4f7; --surface: #ffffff; --ink: #172131; --muted: #5b6577; --line: #d9dee6;
-    --brand: #0b6e79; --brand-ink: #ffffff; --pass: #1d8348; --fail: #c73e3a; --run: #b7791f;
-    --add: #e3f3e8; --del: #fbe7e6; --code: #f7f8fa;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #11161e; --surface: #182029; --ink: #e5e9f0; --muted: #96a1b3; --line: #2a3441;
-      --brand: #3fb6c2; --brand-ink: #071a1d; --pass: #4cc47a; --fail: #f07470; --run: #e2a93b;
-      --add: #173323; --del: #3b1d1e; --code: #141a22;
-    }
+    --bg: #050506; --panel: #0e0e11; --card: #16161b; --card-2: #1f1f25; --card-3: #26262d;
+    --line: rgba(255, 255, 255, .08); --ink: #ffffff; --text: #e4e4e7; --muted: #a1a1aa;
+    --accent: #67e8f9; --accent-ink: #042f38; --brand: #0891b2; --brand-dark: #164e63;
+    --pass: #4ade80; --fail: #fb923c; --warn: #fbbf24; --bad: #f87171; --run: #fbbf24;
+    --add: rgba(74, 222, 128, .12); --del: rgba(251, 146, 60, .14); --code: #000000;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink);
-         font: 15px/1.55 "IBM Plex Sans", system-ui, sans-serif; }
-  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
-
-  header { border-bottom: 1px solid var(--line); background: var(--surface); }
-  .bar { max-width: 1120px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 10px; }
-  .wordmark { font-weight: 600; font-size: 18px; letter-spacing: -.01em; }
-  .bar p { margin: 0 0 0 auto; color: var(--muted); font-size: 14px; }
-
-  main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 64px;
-         display: grid; grid-template-columns: 330px 1fr; gap: 28px; align-items: start; }
-  h1 { font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 600; }
-  h2 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
-  .lede { color: var(--muted); margin: 0 0 12px; }
-  .note { margin: 0 0 8px; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--surface);
-          font-size: 14px; border-radius: 0 6px 6px 0; }
-
-  form label { display: block; font-weight: 500; font-size: 14px; margin: 16px 0 6px; }
-  .help { display: block; color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 2px; }
-  .optional { color: var(--muted); font-weight: 400; }
-  #publish-token-row label { display: block; font-weight: 500; font-size: 14px; margin: 16px 0 6px; }
-  input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
-          background: var(--surface); color: var(--ink); font: inherit; }
-  input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-  button { font: inherit; font-weight: 500; border-radius: 6px; padding: 10px 16px; cursor: pointer; }
-  .primary { background: var(--brand); color: var(--brand-ink); border: 1px solid var(--brand); }
-  .quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
-  button:disabled { opacity: .55; cursor: default; }
-  form .primary { width: 100%; margin-top: 22px; }
-  .error { color: var(--fail); font-size: 14px; margin: 12px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-
-  .run { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .run-head { padding: 20px 24px 18px; border-bottom: 1px solid var(--line); }
-  .run-head .mono { color: var(--muted); font-size: 13px; }
-
-  /* The agents drawn like the stages of a GitLab pipeline graph */
-  .track { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); }
-  .track li { position: relative; text-align: center; font-size: 13px; color: var(--muted); }
-  .track li::before { content: ""; position: absolute; top: 15px; left: -50%; width: 100%; height: 2px; background: var(--line); }
-  .track li:first-child::before { display: none; }
-  .track li.done::before { background: var(--pass); }
-  .track li.running::before, .track li.stopped::before { background: var(--muted); }
-  .node { position: relative; z-index: 1; width: 32px; height: 32px; margin: 0 auto 6px; border-radius: 50%;
-          display: grid; place-items: center; background: var(--surface); border: 2px solid var(--line); }
-  .node svg { width: 16px; height: 16px; }
-  .done .node { border-color: var(--pass); color: var(--pass); }
-  .running .node { border-color: var(--run); color: var(--run); }
-  .running .node::after { content: ""; position: absolute; inset: -6px; border-radius: 50%;
-                          border: 2px solid transparent; border-top-color: var(--run); animation: spin 1s linear infinite; }
-  .stopped .node { border-color: var(--fail); color: var(--fail); }
-  .done, .running, .stopped { color: var(--ink); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .running .node::after { animation: none; } }
-
-
-  .body { padding: 22px 24px 24px; }
-  .empty { color: var(--muted); margin: 0; }
-  .verdict { display: flex; gap: 10px; align-items: baseline; margin: 0 0 16px; font-weight: 600; font-size: 17px; }
-  .verdict .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; transform: translateY(-1px); }
-  .ok .dot { background: var(--pass); } .warn .dot { background: var(--run); } .bad .dot { background: var(--fail); }
-  dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; margin: 0 0 20px; }
-  /* Long errors (an API answer, a URL, a key mask) wrap inside the frame instead of being cut. */
-  dt { color: var(--muted); } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-
-  /* One frame per changed file, like the Changes tab of a GitLab merge request; a click on the name folds it. */
-  .files-summary { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
-  .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .file + .file { margin-top: 10px; }
-  .file-name { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; background: var(--code);
-               font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
-  .file[open] .file-name { border-bottom: 1px solid var(--line); }
-  .file-name .path { flex: 1; min-width: 0; }
-  .file-name .count-add { color: var(--pass); } .file-name .count-del { color: var(--fail); }
-  pre.diff { margin: 0; padding: 8px 0; overflow-x: auto; font-size: 13px; line-height: 1.6; background: var(--surface); }
-  pre.diff span { display: block; padding: 0 12px; white-space: pre; }
-  .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
-
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
-  /* Rounds of "fix until the pipeline passes": errors of the pipeline, what was changed, the next pipeline. */
-  #loop-panel { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
-  #loop-panel h3 { margin: 0 0 6px; font-size: 16px; }
-  #loop-status { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
-  .rounds { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-  .round { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--surface); min-width: 0; }
-  .round h4 { margin: 0 0 10px; font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .badge { font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; }
-  .badge.pass { color: var(--pass); } .badge.fail { color: var(--fail); } .badge.run { color: var(--run); }
-  .round .job { margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
-  .round .job a, .round dd a { color: var(--brand); }
-  pre.errors { margin: 0 0 10px; padding: 8px 10px; background: var(--code); border-radius: 6px; font-size: 12.5px;
-               line-height: 1.5; overflow-x: auto; white-space: pre; }
-  .round dl { margin: 6px 0 0; }
-  .actions p { margin: 0; font-size: 13px; color: var(--muted); }
-  .published { margin-top: 14px; font-size: 14px; }
-  .published a { color: var(--brand); font-weight: 500; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+         font: 14px/1.55 "Plus Jakarta Sans", system-ui, sans-serif; }
+  code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  a { color: var(--accent); } a:hover { color: var(--ink); }
   [hidden] { display: none !important; }
+  input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  @media (max-width: 860px) {
-    main { grid-template-columns: 1fr; padding: 24px 16px 48px; }
-    .bar { padding: 12px 16px; } .bar p { display: none; }
-    .run-head, .body { padding-left: 16px; padding-right: 16px; }
+  /* One screen: the page never scrolls; the rounds and the details scroll inside their own frame. */
+  .app { height: 100vh; padding: 16px; display: flex; }
+  .shell { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px;
+           padding: 18px 20px 16px; border-radius: 20px;
+           background: linear-gradient(180deg, #0e7490 0%, #083344 26%, var(--panel) 52%, var(--panel) 100%); }
+
+  header { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+          background: linear-gradient(135deg, #06b6d4 0%, #155e75 100%); }
+  .wordmark { font-size: 18px; font-weight: 800; color: var(--ink); letter-spacing: -.3px; }
+  form { flex: 1 1 640px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-end; }
+  .field { position: relative; display: flex; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  input { height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--card-2); color: var(--ink);
+          font: inherit; font-size: 13.5px; width: 100%; }
+  input::placeholder { color: #8a8a93; }
+  .f-project { flex: 3 1 280px; } .f-pipeline { flex: 1 1 150px; } .f-access { flex: 1 1 140px; } .f-token { flex: 1 1 170px; }
+  #project, #pipeline { font-family: "JetBrains Mono", monospace; font-size: 13px; }
+  button { font: inherit; font-weight: 700; border-radius: 999px; height: 42px; padding: 0 20px; cursor: pointer; border: 0; }
+  .primary { background: var(--accent); color: var(--accent-ink); }
+  .white { background: var(--ink); color: var(--bg); }
+  .ghost { background: transparent; color: var(--ink); border: 1px solid #52525b; }
+  .info { width: 42px; padding: 0; background: var(--card-2); color: var(--muted); cursor: help; }
+  button:disabled { opacity: .5; cursor: default; }
+  .error { flex-basis: 100%; margin: 0; color: var(--bad); font-size: 13.5px; overflow-wrap: anywhere; white-space: pre-wrap; text-align: right; }
+
+  .top { flex: none; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
+  .card { background: var(--card); border-radius: 20px; min-width: 0; }
+  .hero { padding: 22px 26px; display: flex; flex-direction: column; gap: 10px; min-height: 172px; }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+          background: var(--card-3); color: var(--text); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .chip.ok { background: rgba(74, 222, 128, .12); color: var(--pass); }
+  .chip.warn { background: rgba(251, 191, 36, .14); color: var(--warn); }
+  .chip.bad { background: rgba(248, 113, 113, .14); color: var(--bad); }
+  #run-id { font-size: 12.5px; color: var(--muted); }
+  h1 { margin: 0; font-size: 34px; line-height: 1.1; font-weight: 800; letter-spacing: -1.2px; color: var(--ink); overflow-wrap: anywhere; }
+  .empty { margin: 0; color: #c4c4cc; font-size: 14.5px; max-width: 640px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; }
+  .token-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .token-row input { max-width: 360px; }
+  .published { margin: 0; font-size: 14px; color: var(--text); }
+  .published a { font-weight: 700; }
+  .hero .error { text-align: left; }
+
+  .agents { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
+            background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%); }
+  .agents h2 { margin: 0; font-size: 12.5px; font-weight: 700; color: #cffafe; letter-spacing: .3px; }
+  .track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .track li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 14px;
+              background: rgba(0, 0, 0, .22); color: rgba(255, 255, 255, .6); font-weight: 700; font-size: 13.5px; }
+  .node { position: relative; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+          border: 2px solid rgba(255, 255, 255, .25); }
+  .node svg { width: 13px; height: 13px; }
+  .track .done { color: var(--ink); } .track .done .node { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .track .running { color: var(--ink); } .track .running .node { border-color: var(--run); }
+  .track .running .node::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent;
+                                 border-top-color: var(--run); animation: spin 1s linear infinite; }
+  .track .stopped { color: var(--ink); } .track .stopped .node { background: var(--fail); border-color: var(--fail); color: #1c0a00; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .track .running .node::after { animation: none; } }
+
+  .work { flex: 1 1 auto; min-height: 0; display: flex; gap: 14px; }
+  .pane { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .pane-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 16px 20px 12px; }
+  .pane-head h2 { margin: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
+  .pane-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 20px 20px; }
+  #loop-panel { flex: 0 0 360px; }
+  #loop-status { margin: 0 20px 10px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .count { padding: 2px 10px; border-radius: 999px; background: var(--card-3); color: var(--text); font-size: 12px; font-weight: 700; }
+  .rounds { list-style: none; margin: 0; padding: 0 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+  .round-item { width: 100%; height: auto; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px;
+                background: transparent; color: var(--ink); text-align: left; font-weight: 600; }
+  .round-item:hover { background: var(--card-2); }
+  .round-item[aria-pressed="true"] { background: var(--card-3); }
+  .round-num { flex: none; width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+               background: var(--card-3); font-weight: 800; }
+  .round-item[aria-pressed="true"] .round-num { background: var(--accent); color: var(--accent-ink); }
+  .round-text { flex: 1; min-width: 0; }
+  .round-text b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .round-text span { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+  .badge { flex: none; font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .badge.pass { color: var(--pass); background: rgba(74, 222, 128, .12); }
+  .badge.fail { color: var(--fail); background: rgba(251, 146, 60, .14); }
+  .badge.run { color: var(--run); background: rgba(251, 191, 36, .14); }
+
+  .detail { flex: 1 1 auto; min-width: 0; }
+  .tabs { margin-left: auto; display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--card-3); }
+  .tabs button { height: 34px; padding: 0 14px; background: transparent; color: var(--muted); font-size: 13px; }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+  .placeholder { margin: 0; color: var(--muted); }
+  dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 10px 16px; margin: 0 0 18px; }
+  dt { color: var(--muted); font-weight: 600; } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--text); }
+  .files-summary { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+  .file { border-radius: 16px; overflow: hidden; background: var(--code); }
+  .file + .file { margin-top: 10px; }
+  .file-name { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; background: var(--card-2); font-size: 13px;
+               cursor: pointer; overflow-wrap: anywhere; color: var(--ink); }
+  .file-name .path { flex: 1; min-width: 0; }
+  .count-add { color: var(--pass); } .count-del { color: var(--fail); }
+  pre.diff { margin: 0; padding: 8px 0; overflow-x: auto; font-size: 12.5px; line-height: 1.7; color: var(--text); }
+  pre.diff span { display: block; padding: 0 14px; white-space: pre; }
+  .add { background: var(--add); } .del { background: var(--del); } .hunk { color: var(--muted); }
+  .job { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); }
+  pre.errors { margin: 0 0 16px; padding: 14px 16px; border-radius: 16px; background: var(--code); color: var(--text);
+               font-size: 12.5px; line-height: 1.7; overflow-x: auto; white-space: pre; }
+
+  /* Small screens: the page scrolls again and the blocks stack. */
+  @media (max-width: 980px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; padding: 8px; }
+    .shell { padding: 16px; }
+    form { justify-content: stretch; }
+    .top { grid-template-columns: 1fr; }
+    .work { flex-direction: column; }
+    #loop-panel { flex: none; max-height: 60vh; }
+    .detail { max-height: 80vh; }
+    h1 { font-size: 26px; }
     dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 8px; }
   }
 </style>
 </head>
 <body>
-<header>
-  <div class="bar">
-    <svg width="26" height="14" viewBox="0 0 26 14" aria-hidden="true">
-      <line x1="4" y1="7" x2="22" y2="7" stroke="currentColor" stroke-width="2" opacity=".35"/>
-      <circle cx="4" cy="7" r="3.5" fill="var(--muted)"/><circle cx="13" cy="7" r="3.5" fill="var(--muted)"/>
-      <circle cx="22" cy="7" r="3.5" fill="var(--pass)"/>
-    </svg>
-    <span class="wordmark">PipeFix</span>
-    <p>Diagnoses failed GitLab pipelines and proposes reviewed fixes</p>
-  </div>
-</header>
-
-<main>
-  <section>
-    <h1>Why did the pipeline fail?</h1>
-    <p class="lede">PipeFix reads a failed GitLab pipeline, finds the cause and proposes a fix reviewed by a
-      second agent. Nothing changes in your project until you choose to create the merge request.</p>
-    <p class="note">This proof of concept analyses one pipeline at a time. Give its number, or leave the field
-      empty to analyse the latest failed pipeline of the project.</p>
+<div class="app">
+<div class="shell">
+  <header>
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6.5 12.5l3.6 3.6L17.5 8.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="wordmark">PipeFix</span>
+    </div>
     <form id="form">
-      <label for="access">Access code
-        <span class="help">Given to you by the owner of PipeFix.</span></label>
-      <input id="access" type="password" autocomplete="off" required>
-      <label for="project">Project address
-        <span class="help">Copy it from your browser, for example https://gitlab.com/group/my-project.
-          Works with gitlab.com and self-hosted GitLab; a pipeline page address also gives the pipeline number.</span></label>
-      <input id="project" type="url" placeholder="https://gitlab.com/group/my-project" required>
-      <label for="token">Access token <span class="optional">(optional)</span>
-        <span class="help">Not needed to analyse a public project. Needed for a private project (read_api scope) and
-          to create the merge request (api scope). On a free GitLab.com account, use a personal access token
-          (Preferences, Access tokens). Used for this run only, never stored.</span></label>
-      <input id="token" type="password" autocomplete="off">
-      <label for="pipeline">Pipeline number
-        <span class="help">Shown in GitLab under Build, Pipelines. Empty: the latest failed pipeline.</span></label>
-      <input id="pipeline" inputmode="numeric" placeholder="e.g. 2978771">
-      <button class="primary" id="start" type="submit">Analyse the pipeline</button>
+      <div class="field f-project"><label class="sr" for="project">Project or pipeline address</label>
+        <input id="project" type="url" placeholder="https://gitlab.com/group/project" required></div>
+      <div class="field f-pipeline"><label class="sr" for="pipeline">Pipeline number</label>
+        <input id="pipeline" inputmode="numeric" placeholder="Pipeline # (optional)"></div>
+      <div class="field f-access"><label class="sr" for="access">Access code</label>
+        <input id="access" type="password" autocomplete="off" placeholder="Access code" required></div>
+      <div class="field f-token"><label class="sr" for="token">GitLab access token (optional)</label>
+        <input id="token" type="password" autocomplete="off" placeholder="GitLab token (optional)"></div>
+      <button class="info" type="button" aria-label="Help"
+        title="Access code: given by the owner of PipeFix.&#10;Project: gitlab.com or self-hosted; a pipeline address also gives the number.&#10;Pipeline: empty = the latest failed one.&#10;Token: not needed for a public project; read_api for a private one; api to publish. Used for this run only, never stored.">i</button>
+      <button class="white" id="start" type="submit">Analyse</button>
       <p class="error" id="form-error" role="alert" hidden></p>
     </form>
-  </section>
+  </header>
 
-  <section class="run" aria-live="polite">
-    <div class="run-head">
-      <h2 id="run-title">No analysis yet</h2>
-      <span class="mono" id="run-id"></span>
-      <ol class="track" id="track"></ol>
-    </div>
-    <div class="body">
-      <p class="empty" id="empty">Four agents look at the failure in turn: triage sorts it, diagnosis finds the cause,
-        the fixer writes the change and the reviewer checks it before you see it.</p>
+  <div class="top">
+    <section class="card hero" aria-live="polite">
+      <div class="meta">
+        <span class="chip" id="verdict" hidden><span class="dot"></span><span id="verdict-text"></span></span>
+        <span class="mono" id="run-id"></span>
+      </div>
+      <h1 id="run-title">No analysis yet</h1>
+      <p class="empty" id="empty">Paste a GitLab project address and click Analyse.</p>
       <div id="result" hidden>
-        <p class="verdict" id="verdict"><span class="dot"></span><span id="verdict-text"></span></p>
-        <dl id="details"></dl>
-        <p class="published" id="existing" hidden>Merge or close it before asking for a new fix:
+        <p class="published" id="existing" hidden>A merge request already waits for this pipeline:
           <a id="existing-link" target="_blank" rel="noopener"></a></p>
-        <div id="changes" hidden>
-          <p class="files-summary" id="files-summary"></p>
-          <div id="files"></div>
-          <div class="actions">
-            <button class="primary" id="loop" type="button">Fix until the pipeline passes</button>
-            <button class="quiet" id="publish" type="button">Create merge request</button>
-            <button class="quiet" id="download" type="button">Download patch</button>
-            <p>Fix until the pipeline passes: PipeFix commits this fix, waits for GitLab CI and fixes the new
-              errors, round after round; the draft merge request opens only when the pipeline is green.
-              Create merge request: this fix only, without waiting for the pipeline.</p>
-          </div>
-          <div id="publish-token-row" hidden>
-            <label for="publish-token">Access token with the api scope
-              <span class="help">Needed to write to GitLab (merge request or fix rounds). Kept only while the run lasts, never stored.</span></label>
-            <input id="publish-token" type="password" autocomplete="off">
-          </div>
-          <p class="error" id="publish-error" role="alert" hidden></p>
-          <p class="published" id="published" hidden>Draft merge request created: <a id="mr-link" target="_blank" rel="noopener"></a></p>
+        <div class="actions" id="actions" hidden>
+          <button class="primary" id="loop" type="button"
+            title="Commits this fix, waits for GitLab CI and fixes the new errors round after round. The draft merge request opens only when the pipeline is green.">Fix until the pipeline passes</button>
+          <button class="ghost" id="publish" type="button" title="Publishes this fix alone as a draft merge request, without waiting for the pipeline.">Create merge request</button>
+          <button class="ghost" id="download" type="button">Download patch</button>
         </div>
-        <div id="loop-panel" hidden>
-          <h3>Rounds</h3>
-          <p id="loop-status"></p>
-          <ol class="rounds" id="rounds"></ol>
+        <div class="token-row" id="publish-token-row" hidden>
+          <label class="sr" for="publish-token">GitLab token with the api scope</label>
+          <input id="publish-token" type="password" autocomplete="off" placeholder="GitLab token with the api scope">
+        </div>
+        <p class="error" id="publish-error" role="alert" hidden></p>
+        <p class="published" id="published" hidden>Draft merge request: <a id="mr-link" target="_blank" rel="noopener"></a></p>
+      </div>
+    </section>
+
+    <section class="card agents" aria-label="Agents">
+      <h2>Agents</h2>
+      <ol class="track" id="track"></ol>
+    </section>
+  </div>
+
+  <div class="work">
+    <section class="card pane" id="loop-panel" aria-labelledby="rounds-title" hidden>
+      <div class="pane-head">
+        <h2 id="rounds-title">Rounds</h2>
+        <span class="count" id="round-count">0</span>
+      </div>
+      <p id="loop-status"></p>
+      <div class="pane-body" style="padding: 0">
+        <ol class="rounds" id="rounds"></ol>
+      </div>
+    </section>
+
+    <section class="card pane detail" aria-labelledby="detail-title">
+      <div class="pane-head">
+        <h2 id="detail-title">Proposed fix</h2>
+        <div class="tabs" role="tablist" aria-label="Details" id="tabs" hidden>
+          <button type="button" role="tab" id="tab-fix" aria-selected="true">Fix</button>
+          <button type="button" role="tab" id="tab-round" aria-selected="false">Round</button>
         </div>
       </div>
-    </div>
-  </section>
-</main>
+      <div class="pane-body">
+        <p class="placeholder" id="detail-empty">The cause, the fix and the changed files appear here after an analysis.</p>
+        <div id="pane-fix" hidden>
+          <dl id="details"></dl>
+          <div id="changes" hidden>
+            <p class="files-summary" id="files-summary"></p>
+            <div id="files"></div>
+          </div>
+        </div>
+        <div id="pane-round" hidden></div>
+      </div>
+    </section>
+  </div>
+</div>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const STAGE_LABELS = { triage: "Triage", diagnosis: "Diagnosis", fixer: "Fix", reviewer: "Review" };
 const ICONS = {
-  done: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-  stopped: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  done: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>',
+  stopped: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>',
   running: "", pending: "",
 };
 const VERDICTS = {
@@ -243,12 +273,15 @@ const VERDICTS = {
   no_change_proposed: ["The fixer proposed no change for the new errors", "warn"],
 };
 let token = "", runId = "", runKey = "", patch = "", loopId = "";
+// Rounds of the fix loop: the one shown in the detail pane (null: follow the latest)
+let roundsData = [], roundsFinished = false, pickedRound = null;
 
 drawTrack(Object.keys(STAGE_LABELS).map((name) => ({ name, state: "pending" })));
 
 $("form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  hide("form-error"); hide("result"); hide("published"); hide("publish-error"); hide("loop-panel");
+  hide("form-error"); hide("result"); hide("published"); hide("publish-error"); hide("loop-panel"); hide("verdict");
+  resetDetail();
   loopId = "";
   token = $("token").value.trim();
   const body = {
@@ -265,8 +298,8 @@ $("form").addEventListener("submit", async (event) => {
     const answer = await send("/web/runs", body);
     runId = answer.run_id;
     runKey = answer.run_key;
-    $("run-title").textContent = `Analysing ${answer.project}`;
-    $("run-id").textContent = `Run ${runId}`;
+    $("run-title").textContent = answer.project;
+    $("run-id").textContent = runId;
     show("empty", "The agents are working on it. An analysis usually takes one to three minutes.");
     poll();
   } catch (error) {
@@ -304,7 +337,7 @@ async function poll() {
   const status = data.run ? data.run.status : "running";
   if (status === "running" || status === "queued") { setTimeout(poll, 2500); return; }
   hide("empty");
-  $("run-title").textContent = `Analysis of ${data.run.project || ""}`;
+  $("run-title").textContent = data.run.project || "";
   showResult(data.run, data.patch, data.merge_request);
   $("start").disabled = false;
 }
@@ -321,13 +354,18 @@ function drawTrack(stages) {
   }));
 }
 
+function setVerdict(text, level) {
+  $("verdict").className = `chip ${level}`;
+  $("verdict-text").textContent = text;
+  show("verdict");
+}
+
 function showResult(report, diff, mergeRequest) {
   const failedAgent = String(report.status).endsWith("_failed") ? String(report.status).slice(0, -7) : "";
   const [text, level] = VERDICTS[report.status] || (failedAgent
     ? [`The ${failedAgent} agent could not finish.`, "warn"]
     : [`Finished: ${report.status}`, "warn"]);
-  $("verdict").className = `verdict ${level}`;
-  $("verdict-text").textContent = text;
+  setVerdict(text, level);
   const round = (report.rounds || []).at(-1) || {};
   const rows = [
     ["Cause", round.diagnosis && round.diagnosis.root_cause],
@@ -344,14 +382,36 @@ function showResult(report, diff, mergeRequest) {
   $("details").replaceChildren(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
   patch = diff || "";
   $("changes").hidden = !patch;
+  $("actions").hidden = !patch;
   if (patch) {
     const files = splitPatch(patch);
     $("files-summary").textContent = files.length === 1 ? "1 file changed" : `${files.length} files changed`;
     $("files").replaceChildren(...files.map(fileBlock));
   }
+  hide("detail-empty");
+  showTab("fix");
   setActions(true);
   if (mergeRequest) showPublished(mergeRequest);
   show("result");
+}
+
+// The detail pane shows the proposed fix, or one round of the fix loop.
+function showTab(name) {
+  const round = name === "round";
+  $("tab-fix").setAttribute("aria-selected", String(!round));
+  $("tab-round").setAttribute("aria-selected", String(round));
+  $("pane-fix").hidden = round;
+  $("pane-round").hidden = !round;
+  $("detail-title").textContent = round ? `Round ${currentRound() ? currentRound().number : ""}` : "Proposed fix";
+}
+$("tab-fix").addEventListener("click", () => showTab("fix"));
+$("tab-round").addEventListener("click", () => showTab("round"));
+
+function resetDetail() {
+  roundsData = []; roundsFinished = false; pickedRound = null;
+  $("rounds").replaceChildren(); $("pane-round").replaceChildren();
+  hide("tabs"); hide("pane-fix"); hide("pane-round"); show("detail-empty");
+  $("detail-title").textContent = "Proposed fix";
 }
 
 // Split a unified patch into one entry per file: { path, lines }, without the file header lines.
@@ -387,7 +447,7 @@ function fileBlock(file) {
   path.className = "path";
   const plus = tag("span", `+${added}`);
   plus.className = "count-add";
-  const minus = tag("span", `\u2212${removed}`);
+  const minus = tag("span", `−${removed}`);
   minus.className = "count-del";
   name.append(path, plus, minus);
   const code = document.createElement("pre");
@@ -427,6 +487,7 @@ $("loop").addEventListener("click", async () => {
   try {
     const answer = await send(`/web/runs/${runId}/fix-until-green`, null, { "X-Run-Key": runKey, "X-Gitlab-Token": token });
     loopId = answer.run_id;
+    roundsData = []; pickedRound = null;
     $("rounds").replaceChildren();
     show("loop-panel");
     show("loop-status", "Committing the fix and waiting for the pipeline of GitLab...");
@@ -464,8 +525,7 @@ async function pollLoop() {
     return;
   }
   const [text, level] = VERDICTS[status] || [`Finished: ${status}`, "warn"];
-  $("verdict").className = `verdict ${level}`;
-  $("verdict-text").textContent = text;
+  setVerdict(text, level);
   const branch = run.fix_branch ? ` Fix branch: ${run.fix_branch}.` : "";
   show("loop-status", (run.error ? `${run.error}` : "Finished.") + branch);
   if (run.merge_request) {
@@ -507,47 +567,72 @@ function roundBadge(round, finished) {
   return [round.status === "fix_ready" ? "committing" : "fixing", "run"];
 }
 
+function currentRound() {
+  return roundsData.find((round) => round.number === pickedRound) || roundsData.at(-1);
+}
+
+// The rounds list: one short line per round; a click shows that round in the detail pane.
 function drawRounds(rounds, finished = false) {
+  const first = !roundsData.length && rounds.length;
+  roundsData = rounds; roundsFinished = finished;
+  $("round-count").textContent = String(rounds.length);
+  const shown = currentRound();
   $("rounds").replaceChildren(...rounds.map((round) => {
     const item = tag("li", "");
-    item.className = "round";
-    const title = tag("h4", `Round ${round.number}`);
-    const result = round.result || {};
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "round-item";
+    button.setAttribute("aria-pressed", String(shown && shown.number === round.number));
+    const num = tag("span", String(round.number));
+    num.className = "round-num";
+    const text = tag("span", "");
+    text.className = "round-text";
+    const errorCount = (round.errors || []).reduce((total, job) => total + (job.lines || []).length, 0);
+    text.append(tag("b", round.cause || (errorCount ? `${errorCount} error lines` : "In progress")),
+                tag("span", round.commit && round.commit.sha ? round.commit.sha.slice(0, 8) : `pipeline #${round.pipeline || ""}`));
     const [badgeText, badgeLevel] = roundBadge(round, finished);
     const badge = tag("span", badgeText);
     badge.className = `badge ${badgeLevel}`;
-    title.append(badge);
-    item.append(title);
-    for (const job of round.errors || []) {
-      const label = tag("p", "Errors in job ");
-      label.className = "job";
-      label.append(link(job.url, job.job || "job"));
-      if (round.pipeline) label.append(` of pipeline #${round.pipeline}`);
-      const lines = job.lines && job.lines.length ? job.lines.join("\n") : "(no error line recognised: open the job log)";
-      const errors = tag("pre", lines);
-      errors.className = "errors";
-      item.append(label, errors);
-    }
-    const rows = [
-      ["Cause", round.cause],
-      ["Fix", round.fix],
-      ["Files", (round.files || []).join(", ")],
-    ].filter(([, value]) => value);
-    const details = document.createElement("dl");
-    details.append(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
-    if (round.commit && round.commit.sha) {
-      const commit = tag("dd", "");
-      commit.append(link(round.commit.url, round.commit.sha.slice(0, 8)));
-      details.append(tag("dt", "Commit"), commit);
-    }
-    if (result.pipeline) {
-      const pipeline = tag("dd", "");
-      pipeline.append(link(result.url, `#${result.pipeline}`), ` ${result.status}`);
-      details.append(tag("dt", "Pipeline"), pipeline);
-    }
-    if (details.childElementCount) item.append(details);
+    button.append(num, text, badge);
+    button.addEventListener("click", () => { pickedRound = round.number; drawRounds(roundsData, roundsFinished); showTab("round"); });
+    item.append(button);
     return item;
   }));
+  if (shown) $("pane-round").replaceChildren(...roundDetail(shown));
+  if (rounds.length) show("tabs");
+  hide("detail-empty");
+  if (first) showTab("round");
+  else if (!$("pane-round").hidden) $("detail-title").textContent = `Round ${shown ? shown.number : ""}`;
+}
+
+function roundDetail(round) {
+  const nodes = [];
+  for (const job of round.errors || []) {
+    const label = tag("p", "Errors in job ");
+    label.className = "job";
+    label.append(link(job.url, job.job || "job"));
+    if (round.pipeline) label.append(` of pipeline #${round.pipeline}`);
+    const lines = job.lines && job.lines.length ? job.lines.join("\n") : "(no error line recognised: open the job log)";
+    const errors = tag("pre", lines);
+    errors.className = "errors";
+    nodes.push(label, errors);
+  }
+  const result = round.result || {};
+  const details = document.createElement("dl");
+  const rows = [["Cause", round.cause], ["Fix", round.fix], ["Files", (round.files || []).join(", ")]].filter(([, value]) => value);
+  details.append(...rows.flatMap(([name, value]) => [tag("dt", name), tag("dd", value)]));
+  if (round.commit && round.commit.sha) {
+    const commit = tag("dd", "");
+    commit.append(link(round.commit.url, round.commit.sha.slice(0, 8)));
+    details.append(tag("dt", "Commit"), commit);
+  }
+  if (result.pipeline) {
+    const pipeline = tag("dd", "");
+    pipeline.append(link(result.url, `#${result.pipeline}`), ` ${result.status}`);
+    details.append(tag("dt", "Pipeline"), pipeline);
+  }
+  if (details.childElementCount) nodes.push(details);
+  return nodes;
 }
 
 $("publish").addEventListener("click", async () => {
@@ -568,7 +653,7 @@ $("publish").addEventListener("click", async () => {
 
 function showPublished(url) {
   $("mr-link").href = url;
-  $("mr-link").textContent = url;
+  $("mr-link").textContent = mergeRequestLabel(url);
   setActions(false);
   show("published");
 }
