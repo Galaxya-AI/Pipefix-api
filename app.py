@@ -40,6 +40,7 @@ from journal.run_journal import RunJournal
 from startup.services import build_api_services, build_user_loop_function, build_user_run_function
 from web_support import (
     access_owner,
+    access_request_email,
     check_pipeline_to_fix,
     parse_project_url,
     public_run,
@@ -234,7 +235,7 @@ def gitlab_webhook() -> tuple[Response, int]:
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html")
+    return render_template("index.html", access_request_email=access_request_email())
 
 
 @app.post("/web/runs")

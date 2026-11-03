@@ -48,6 +48,7 @@
   .white { background: var(--ink); color: var(--bg); }
   .ghost { background: transparent; color: var(--ink); border: 1px solid #52525b; }
   .help-btn { display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; }
+  .ask-code { flex: 1 1 100%; margin: 0; font-size: 13px; color: var(--muted); }
   header { position: relative; }
   .help { position: absolute; top: calc(100% + 10px); right: 0; z-index: 10; width: min(520px, 100%); max-height: 70vh; overflow-y: auto;
           padding: 22px 24px; border-radius: 20px; background: var(--card-2); border: 1px solid var(--line);
@@ -82,15 +83,20 @@
   .agents { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
             background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%); }
   .agents h2 { margin: 0; font-size: 12.5px; font-weight: 700; color: #cffafe; letter-spacing: .3px; }
-  .track { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .track li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 14px;
-              background: rgba(0, 0, 0, .22); color: rgba(255, 255, 255, .6); font-weight: 700; font-size: 13.5px; }
-  .node { position: relative; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-          border: 2px solid rgba(255, 255, 255, .25); }
-  .node svg { width: 13px; height: 13px; }
+  /* The four agents one after the other: circles joined by a line, the name under each one */
+  .track { list-style: none; margin: auto 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .track li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
+              color: rgba(255, 255, 255, .6); font-weight: 700; font-size: 13px; text-align: center; }
+  .track li::before { content: ""; position: absolute; top: 16px; right: 50%; width: 100%; height: 2px;
+                      background: rgba(255, 255, 255, .22); }
+  .track li:first-child::before { display: none; }
+  .track li.done::before { background: var(--accent); }
+  .node { position: relative; z-index: 1; flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid;
+          place-items: center; border: 2px solid rgba(255, 255, 255, .3); background: var(--brand-dark); }
+  .node svg { width: 15px; height: 15px; }
   .track .done { color: var(--ink); } .track .done .node { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .track .running { color: var(--ink); } .track .running .node { border-color: var(--run); }
-  .track .running .node::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent;
+  .track .running .node::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid transparent;
                                  border-top-color: var(--run); animation: spin 1s linear infinite; }
   .track .stopped { color: var(--ink); } .track .stopped .node { background: var(--fail); border-color: var(--fail); color: #1c0a00; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -178,13 +184,17 @@
         Help</button>
       <button class="white" id="start" type="submit">Analyse</button>
       <p class="error" id="form-error" role="alert" hidden></p>
+      {% if access_request_email %}
+      {% set ask_href = "mailto:" ~ access_request_email ~ "?subject=" ~ ("PipeFix access code request"|urlencode) ~ "&body=" ~ ("Hello,\n\nI would like to test PipeFix on my own GitLab project.\n\nName:\nCompany:\nGitLab project:\n\nThank you"|urlencode) %}
+      <p class="ask-code">No access code? <a id="ask-code-link" href="{{ ask_href }}">Ask for one by email</a></p>
+      {% endif %}
     </form>
     <div class="help" id="help" role="dialog" aria-label="Help" hidden>
       <h2>What to fill in</h2>
       <dl>
         <dt>Project</dt><dd>The address of a GitLab project, on gitlab.com or a self-hosted GitLab. The address of a pipeline page also gives its number.</dd>
         <dt>Pipeline</dt><dd>Optional. Empty: PipeFix takes the latest failed pipeline of the project.</dd>
-        <dt>Access code</dt><dd>Given to you by the owner of PipeFix.</dd>
+        <dt>Access code</dt><dd>Given to you by the owner of PipeFix.{% if access_request_email %} <a href="{{ ask_href }}">Ask for one by email</a>.{% endif %}</dd>
         <dt>GitLab token</dt><dd>Not needed for a public project. A private project needs the read_api scope, and publishing a fix needs the api scope. Used for this run only, never stored.</dd>
       </dl>
       <h2>The buttons after an analysis</h2>
@@ -222,8 +232,8 @@
       </div>
     </section>
 
-    <section class="card agents" aria-label="Agents">
-      <h2>Agents</h2>
+    <section class="card agents" aria-label="Process">
+      <h2>Process</h2>
       <ol class="track" id="track"></ol>
     </section>
   </div>
@@ -240,7 +250,7 @@
       </div>
     </section>
 
-    <section class="card pane detail" aria-labelledby="detail-title">
+    <section class="card pane detail" id="detail" aria-labelledby="detail-title" hidden>
       <div class="pane-head">
         <h2 id="detail-title">Proposed fix</h2>
         <div class="tabs" role="tablist" aria-label="Details" id="tabs" hidden>
@@ -339,6 +349,13 @@ $("form").addEventListener("submit", async (event) => {
     poll();
   } catch (error) {
     show("form-error", error.message);
+    // A wrong or missing access code: offer the request link right there
+    const ask = $("ask-code-link");
+    if (ask && /access code/i.test(error.message)) {
+      const link = ask.cloneNode(true);
+      link.removeAttribute("id");
+      $("form-error").append(" ", link);
+    }
     $("start").disabled = false;
   }
 });
@@ -423,7 +440,7 @@ function showResult(report, diff, mergeRequest) {
     $("files-summary").textContent = files.length === 1 ? "1 file changed" : `${files.length} files changed`;
     $("files").replaceChildren(...files.map(fileBlock));
   }
-  hide("detail-empty");
+  hide("detail-empty"); show("detail");
   showTab("fix");
   setActions(true);
   if (mergeRequest) showPublished(mergeRequest);
@@ -445,7 +462,7 @@ $("tab-round").addEventListener("click", () => showTab("round"));
 function resetDetail() {
   roundsData = []; roundsFinished = false; pickedRound = null;
   $("rounds").replaceChildren(); $("pane-round").replaceChildren();
-  hide("tabs"); hide("pane-fix"); hide("pane-round"); show("detail-empty");
+  hide("tabs"); hide("pane-fix"); hide("pane-round"); show("detail-empty"); hide("detail");
   $("detail-title").textContent = "Proposed fix";
 }
 
@@ -635,7 +652,7 @@ function drawRounds(rounds, finished = false) {
   }));
   if (shown) $("pane-round").replaceChildren(...roundDetail(shown));
   if (rounds.length) show("tabs");
-  hide("detail-empty");
+  hide("detail-empty"); show("detail");
   if (first) showTab("round");
   else if (!$("pane-round").hidden) $("detail-title").textContent = `Round ${shown ? shown.number : ""}`;
 }

@@ -18,6 +18,8 @@ from connectors.gitlab.client import GitLabClient
 from workflow_publication.publisher import MERGE_REQUEST_FILE
 
 ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
+# Address that receives the access code requests ("Ask for one" link on the page); empty: no link.
+ACCESS_REQUEST_EMAIL = os.getenv("ACCESS_REQUEST_EMAIL", "").strip()
 PIPELINE_IN_URL = re.compile(r"/-/pipelines/(\d+)")
 STAGES = ("triage", "diagnosis", "fixer", "reviewer")
 
@@ -87,6 +89,12 @@ def access_owner(code: str) -> str | None:
         if name and expected and hmac.compare_digest(code.encode(), expected.encode()):
             return name
     return None
+
+
+def access_request_email(value: str | None = None) -> str:
+    """The address of the "Ask for an access code" link, or "" when it is missing or not an email address."""
+    address = ACCESS_REQUEST_EMAIL if value is None else value.strip()
+    return address if re.fullmatch(r"[^@\s?&#\"'<>]+@[^@\s?&#\"'<>]+\.[^@\s?&#\"'<>]+", address) else ""
 
 
 def secret_hash(value: str) -> str:

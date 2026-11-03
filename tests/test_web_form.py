@@ -264,3 +264,17 @@ def test_a_visitor_gets_a_clear_message_after_the_daily_limit(
     refused = client.post("/web/runs", json=body)
     assert refused.status_code == 429
     assert "Daily limit reached: 1 analyses per access code" in refused.get_json()["message"]
+
+
+def test_the_page_offers_to_ask_for_an_access_code_only_when_an_address_is_set(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import web_support
+
+    assert "Ask for one by email" not in client.get("/").get_data(as_text=True)
+    monkeypatch.setattr(web_support, "ACCESS_REQUEST_EMAIL", "owner@example.com")
+    page = client.get("/").get_data(as_text=True)
+    assert 'href="mailto:owner@example.com?subject=PipeFix%20access%20code%20request&amp;body=' in page
+    assert page.count("Ask for one by email") == 2
+    assert web_support.access_request_email("not an address") == ""
+    assert web_support.access_request_email('a@b.com" onclick="x') == ""
