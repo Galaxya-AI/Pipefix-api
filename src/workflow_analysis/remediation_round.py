@@ -158,6 +158,12 @@ class RemediationRound:
         per_agent = {name: count - before.get(name, 0) for name, count in after.items() if count > before.get(name, 0)}
         details = {"pipeline": pipeline.get("id"), "per_agent": per_agent, "round_calls": sum(per_agent.values())}
         details["run_calls"] = sum(after.values())
+        totals = getattr(getattr(self.runner, "usage", None), "totals", None)
+        if callable(totals):
+            tokens = totals()
+            if isinstance(tokens, dict):
+                # Share of the input the provider read from its cache: the higher, the cheaper the run
+                details["run_tokens"] = tokens
         self.journal.log("remediation_round", "llm_calls", details)
 
     def run_agents(

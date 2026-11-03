@@ -40,6 +40,8 @@ class LLMResponse:
     tool_calls: tuple[ToolCall, ...] = ()
     input_tokens: int = 0
     output_tokens: int = 0
+    # Part of input_tokens the provider read from its prompt cache (billed much cheaper)
+    cached_input_tokens: int = 0
 
     def as_message(self) -> Message:
         return {

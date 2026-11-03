@@ -72,7 +72,17 @@ def parse_openai_response(data: dict[str, Any]) -> LLMResponse:
         tool_calls=tuple(parse_openai_tool_call(raw_call) for raw_call in message.get("tool_calls") or []),
         input_tokens=int(usage.get("prompt_tokens", 0) or 0),
         output_tokens=int(usage.get("completion_tokens", 0) or 0),
+        cached_input_tokens=cached_tokens(usage),
     )
+
+
+def cached_tokens(usage: dict[str, Any]) -> int:
+    """Input tokens read from the provider's prompt cache ("prompt_tokens_details.cached_tokens"), 0 if absent."""
+    details = usage.get("prompt_tokens_details") or {}
+    try:
+        return int(details.get("cached_tokens", 0) or 0) if isinstance(details, dict) else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def first_openai_message(data: dict[str, Any]) -> dict[str, Any]:
