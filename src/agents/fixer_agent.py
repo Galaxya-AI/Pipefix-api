@@ -57,7 +57,8 @@ Method (each answer of yours costs one LLM call: use as few answers as possible)
    old_text copied exactly from the file content (spaces, indentation, no line numbers) and long
    enough to be unique in the file.
 3. In the SAME answer, after propose_edits, call submit_fixer. If an edit fails, no edit is kept:
-   you get the error and send all the edits again, corrected.
+   you get the error and send all the edits again, corrected. propose_edits also refuses edits that
+   add a Python error (undefined name, syntax error): import every name you use, keep indentation.
 4. The diagnosis may list several causes: fix ALL of them in this attempt, not only the first,
    so that the next pipeline does not stop on an error already known. Check every failed test
    in the logs: each one must be fixed by one of your edits or already be correct.

@@ -29,8 +29,14 @@ def unified_diff(path: str, before: str, after: str) -> str:
 class Changeset:
     """Pending changes, file by file; `read_file` returns the exact content of a repository file."""
 
-    def __init__(self, read_file: Callable[[str], str]) -> None:
+    def __init__(
+        self,
+        read_file: Callable[[str], str],
+        check: Callable[[dict[str, tuple[str, str]]], list[str]] | None = None,
+    ) -> None:
+        """`check` returns the problems a change adds (e.g. pyflakes): propose_edits refuses such edits."""
         self.read_file = read_file
+        self.check = check
         # path -> (original content, changed content)
         self.files: dict[str, tuple[str, str]] = {}
 
@@ -88,6 +94,16 @@ class Changeset:
                     f"Edit {index} of {len(edits)} ({shown}): {error} "
                     "No edit of this call was kept: send all the edits again, with this one corrected."
                 ) from error
+        touched = sorted({edit["path"].strip() for edit in edits})
+        problems = self.check({path: self.files[path] for path in touched if path in self.files}) if self.check else []
+        if problems:
+            self.files = saved
+            raise ToolError(
+                "No edit of this call was kept: the changed code would have these errors (static check):\n"
+                + "\n".join(problems)
+                + "\nFix them (e.g. import a name you use, check indentation and parentheses) "
+                "and send all the edits again."
+            )
         return "".join(diffs)
 
     def diff(self) -> str:

@@ -31,6 +31,7 @@ FAILURE_STATUSES = frozenset(
         "no_failed_jobs",
         "no_change_proposed",
         "review_rejected",
+        "static_check_failed",
         "max_rounds_reached",
         "pipeline_timeout",
         "blocked_by_policy",

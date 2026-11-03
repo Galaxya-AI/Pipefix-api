@@ -55,3 +55,27 @@ def added_problems(files: dict[str, tuple[str, str]]) -> list[str]:
                 continue
             problems.append(message)
     return problems
+
+
+# Line number of a pyflakes message: "path:12:5: ..." or "path:12: syntax error: ..."
+LINE_PATTERN = re.compile(r"^[^:]*:(\d+):")
+
+
+def with_lines(message: str, source: str, around: int = 1) -> str:
+    """Add the code lines around the line a message names, so the fixer sees what to repair."""
+    found = LINE_PATTERN.match(message)
+    if not found:
+        return message
+    number = int(found.group(1))
+    lines = source.splitlines()
+    first, last = max(1, number - around), min(len(lines), number + around)
+    shown = [f"    {index:>4} | {lines[index - 1]}" for index in range(first, last + 1)]
+    return "\n".join([message, *shown])
+
+
+def added_problems_with_lines(files: dict[str, tuple[str, str]]) -> list[str]:
+    """Like added_problems, each problem followed by the code lines around it."""
+    problems: list[str] = []
+    for path, (before, after) in sorted(files.items()):
+        problems.extend(with_lines(problem, after) for problem in added_problems({path: (before, after)}))
+    return problems

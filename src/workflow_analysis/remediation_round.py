@@ -18,7 +18,7 @@ from agents.outputs import AgentOutput
 from agents.reviewer import ReviewOutput
 from agents.triage import TriageOutput
 from changeset.changeset import Changeset
-from changeset.static_check import added_problems
+from changeset.static_check import added_problems_with_lines
 from journal.run_journal import RunJournal
 from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
@@ -107,7 +107,8 @@ class RemediationRound:
             return result
         sha = str(pipeline.get("sha", ""))
         # Files are read from the analysed commit, not from the branch head
-        changeset = Changeset(lambda path: self.platform.file_raw(project, path, sha))
+        # propose_edits refuses edits that add a Python error, so the fixer repairs them in the same conversation
+        changeset = Changeset(lambda path: self.platform.file_raw(project, path, sha), check=added_problems_with_lines)
         self.runner.tools = build_run_registry(
             self.tools, project, sha, changeset, self.policy, self.journal, allow_research
         )
@@ -176,6 +177,7 @@ class RemediationRound:
         if diagnosis is None:
             return
         issues: list[str] = []
+        static_check_failed = False
         for attempt in range(1, self.max_fix_attempts + 1):
             result.attempts = attempt
             paths = [*getattr(diagnosis, "files", []), *changeset.changed_files()]
@@ -189,12 +191,14 @@ class RemediationRound:
             result.diff = changeset.diff()
             # Errors a static check finds (e.g. a name used after its import was removed) go back
             # to the fixer at once: the reviewer is not asked to approve a change that cannot run.
-            problems = added_problems(changeset.files)
+            problems = added_problems_with_lines(changeset.files)
             if problems:
                 self.journal.log("remediation_round", "static_check_failed", {"attempt": attempt, "problems": problems})
                 issues = [f"Static check (pyflakes) of the proposed change: {problem}" for problem in problems]
-                result.error = "; ".join(problems)
+                result.error = "; ".join(problem.splitlines()[0] for problem in problems)
+                static_check_failed = True
                 continue
+            static_check_failed = False
             changed = file_contents(changeset.current, changeset.changed_files(), TASK_FILE_MAX_CHARS, TASK_MAX_FILES)
             task = review_task(context, diagnosis, result.fix, result.diff, changed)
             result.review = self.run_agent("reviewer", task, result)
@@ -206,7 +210,8 @@ class RemediationRound:
                 result.files = changeset.changed_files()
                 return
             issues = list(result.review.issues) if isinstance(result.review, ReviewOutput) else []
-        result.status = "review_rejected"
+        # The last attempt may never have reached the reviewer
+        result.status = "static_check_failed" if static_check_failed else "review_rejected"
 
     def run_agent(self, agent_name: str, task: str, result: RoundResult) -> AgentOutput | None:
         """Return the agent's validated output, or None after recording its failure in the round."""
