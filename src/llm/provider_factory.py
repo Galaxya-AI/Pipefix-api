@@ -12,13 +12,15 @@ from collections.abc import Iterable
 
 from llm.base import LLMClient, LLMProvider, LLMResponse, Message, ToolDefinition
 from llm.errors import LLMError
-from llm.providers.openai.provider import OpenAIProvider
+from llm.providers.openai.provider import OpenAIProvider, parse_reasoning_efforts
 from llm.retry import RetryingLLMClient
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # Local OpenAI-format server (provider "ollama"), e.g. http://localhost:11434/v1
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
 LLM_TIMEOUT_S = int(os.getenv("LLM_TIMEOUT_S", "180"))
+# Optional reasoning effort per OpenAI model, e.g. "gpt-6.1-terra=low,gpt-6-luna=none" (lower effort, lower cost)
+OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "")
 
 
 class ProviderClient:
@@ -52,7 +54,8 @@ def build_providers(
     """Create one adapter per provider whose key (or URL) is set; the list may be empty."""
     providers: list[LLMProvider] = []
     if openai_api_key:
-        providers.append(OpenAIProvider("openai", openai_api_key, timeout_s=timeout_s))
+        efforts = parse_reasoning_efforts(OPENAI_REASONING_EFFORT)
+        providers.append(OpenAIProvider("openai", openai_api_key, timeout_s=timeout_s, reasoning_efforts=efforts))
     if ollama_base_url:
         providers.append(OpenAIProvider("ollama", "", base_url=ollama_base_url, timeout_s=timeout_s))
     return providers
