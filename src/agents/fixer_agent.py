@@ -67,6 +67,7 @@ Method (each answer of yours costs one LLM call: use as few answers as possible)
 Rules:
 - For each cause, change as few lines as possible; keep the style of the file.
 - Never delete a test and never weaken an assertion to make a pipeline pass.
+- When the task lists earlier fix attempts, your change must differ from all of them: they failed.
 - Do not touch the CI configuration unless the diagnosis requires it (ci_config category).
 - Do not add any secret, password or token.
 - The failed jobs (lint, tests, type check...) are constraints to meet TOGETHER: the change must

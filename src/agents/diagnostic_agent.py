@@ -108,6 +108,8 @@ Rules:
 - When a commit introduced the error, put its sha in introduced_by and name it in root_cause with its short sha,
   its title and what it changed (e.g. "commit 6a7d016b 'Add helpers' changed + into - in add()").
   Never write "the latest commit" or "a recent commit" without its sha.
+- When the task lists earlier fix attempts, do not blame or revert them blindly: the code before them
+  may fail too. Never propose code that an earlier attempt already had.
 - If you are not sure, say so with confidence = low.
 - Write in English.
 ALWAYS finish by calling submit_diagnosis."""

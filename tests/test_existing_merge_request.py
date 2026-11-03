@@ -27,7 +27,7 @@ class Round:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, *args: Any) -> Any:
+    def run(self, *args: Any, **kwargs: Any) -> Any:
         self.calls += 1
         return type("Result", (), {"status": "no_fix", "as_report": lambda self: {"status": "no_fix"}})()
 

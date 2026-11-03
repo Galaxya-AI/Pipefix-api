@@ -83,10 +83,11 @@ class RemediationRound:
         jobs = self.platform.pipeline_jobs(project, int(pipeline["id"]), scope="failed")
         return [job for job in jobs if not job.get("allow_failure")] or jobs
 
-    def run(self, project: str, pipeline: dict[str, Any], allow_research: bool) -> RoundResult:
+    def run(self, project: str, pipeline: dict[str, Any], allow_research: bool, history: str = "") -> RoundResult:
+        """`history`: the earlier fix attempts on this branch, added to the context of every agent."""
         calls_before = self.llm_calls()
         try:
-            return self.run_agents(project, pipeline, allow_research)
+            return self.run_agents(project, pipeline, allow_research, history)
         finally:
             self.log_llm_calls(pipeline, calls_before)
 
@@ -103,7 +104,9 @@ class RemediationRound:
         details["run_calls"] = sum(after.values())
         self.journal.log("remediation_round", "llm_calls", details)
 
-    def run_agents(self, project: str, pipeline: dict[str, Any], allow_research: bool) -> RoundResult:
+    def run_agents(
+        self, project: str, pipeline: dict[str, Any], allow_research: bool, history: str = ""
+    ) -> RoundResult:
         result = RoundResult(pipeline_id=int(pipeline["id"]))
         jobs = self.failed_jobs(project, pipeline)
         if not jobs:
@@ -129,6 +132,8 @@ class RemediationRound:
         tests = failed_test_sources(changeset.current, error_lines, FAILED_TESTS_MAX_CHARS)
         if tests:
             context += f"\n\n## Code of the failed tests (as in the analysed commit)\n{tests}"
+        if history:
+            context += f"\n\n{history}"
         if not self.analyse(project, context, result, jobs):
             return result
         self.fix_and_review(context, changeset, result)
