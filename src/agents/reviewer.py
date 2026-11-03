@@ -65,6 +65,7 @@ Check:
    (also through globals(), getattr, importlib or a side effect) or if another failed job reports
    a NameError or ImportError about it.
 8. All the failed jobs: the diff must not fix one job (e.g. lint) by breaking another (e.g. tests).
+9. Earlier attempts: reject a diff that restores the code of an earlier fix attempt listed in the task.
 
 Rules:
 - You do not run the tests: never write that the tests pass; say what you checked.

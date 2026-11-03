@@ -216,3 +216,18 @@ def test_agent_failure_shows_only_a_known_limit(client: FlaskClient) -> None:
         {"status": "diagnosis_failed", "rounds": [{"error": "KeyError 'x' in /app/src/agent_runner.py line 9"}]}
     )
     assert "agent_runner" not in str(other)
+
+
+def test_api_is_closed_without_api_token(services: ApiServices, client: FlaskClient) -> None:
+    services.api_token = ""
+    assert client.get("/api/v1/tools").status_code == 503
+    assert client.post("/api/v1/runs", json={"project": "group/app"}).status_code == 503
+    # The web page does not use API_TOKEN, and /health stays public
+    assert client.get("/health").status_code == 200
+    assert client.get("/").status_code == 200
+
+
+def test_api_needs_the_right_bearer_token(client: FlaskClient) -> None:
+    assert client.get("/api/v1/tools").status_code == 401
+    assert client.get("/api/v1/tools", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.get("/api/v1/tools", headers={"Authorization": "Bearer t"}).status_code == 200

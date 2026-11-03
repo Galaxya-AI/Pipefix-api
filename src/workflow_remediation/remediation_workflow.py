@@ -26,6 +26,7 @@ from policy.data_policy import DataPolicy
 from startup.env_values import env_bool, env_int
 from tools.registry import ToolRegistry
 from tools.tool import Tool
+from workflow_analysis.attempt_history import Attempt, earlier_pipelines, errors_of, history_text
 from workflow_analysis.pipeline_selection import find_pipeline, origin_pipeline_id, refusal_status
 from workflow_analysis.policy_check import STATUS_BLOCKED, check_project_policy
 from workflow_analysis.remediation_round import RemediationRound
@@ -237,6 +238,9 @@ class RemediationWorkflow:
         branch = str(report.get("fix_branch") or fix_branch_name(int(pipeline["id"]), self.journal.run_id))
         seen_failures: set[tuple[str, ...]] = set()
         last_result: RoundResult | None = None
+        # Fixes committed by this run, given to the next rounds so they do not try them again
+        attempts: list[Attempt] = []
+        earlier = earlier_pipelines(self.platform, project, current)
         for round_number in range(1, self.max_rounds + 1):
             if self.wait_for_pipeline and not self.dry_run:
                 failing_jobs = self.platform.pipeline_jobs(project, int(current["id"]), scope="failed")
@@ -245,6 +249,8 @@ class RemediationWorkflow:
                     for job in failing_jobs
                     if not job.get("allow_failure")
                 }
+                if attempts:
+                    attempts[-1].errors_after = errors_of(traces)
                 signature = failed_job_signature(failing_jobs, traces)
                 if signature and signature in seen_failures:
                     report["error"] = "The same job failures were observed again; manual review required."
@@ -257,7 +263,8 @@ class RemediationWorkflow:
                 self.remediation_round.record_errors(project, current)
                 result = first_result
             else:
-                result = self.remediation_round.run(project, current, allow_research)
+                history = history_text(current, earlier, attempts)
+                result = self.remediation_round.run(project, current, allow_research, history=history)
             report["rounds"].append(result.as_report())
             self.log_round_result(round_number, result)
             if result.status != "fix_ready":
@@ -276,6 +283,7 @@ class RemediationWorkflow:
             last_result = result
             commit = self.commit_fix(project, pipeline, branch, result)
             sha = str(commit.get("id", ""))
+            attempts.append(Attempt(round=round_number, commit=sha, diff=str(getattr(result, "diff", "") or "")))
             report["fix_branch"] = branch
             report.setdefault("validations", []).append({"round": round_number, "commit_sha": sha})
             if not self.wait_for_pipeline:
