@@ -106,6 +106,11 @@ class Changeset:
             )
         return "".join(diffs)
 
+    def replace_file(self, path: str, content: str) -> None:
+        """Record a whole new content for a file (e.g. fixed by ruff), keeping the original for the diff."""
+        original = self.files[path][0] if path in self.files else self.current(path)
+        self.files[path] = (original, content)
+
     def diff(self) -> str:
         """Return the unified diff of every change, in path order (empty if nothing changed)."""
         return "".join(
