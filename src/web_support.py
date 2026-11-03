@@ -120,6 +120,10 @@ def agent_failure_reason(error: str) -> str | None:
     found = re.search(r"Agent '(\w+)' gave \d+ invalid final answers", error)
     if found:
         return f"The {found.group(1)} agent did not give a valid answer. Try again."
+    found = re.search(r"LLM API error (4\d\d): .*?\"message\": \"(.+?)\"", error, re.DOTALL)
+    if found:
+        # The provider refused the request: its message says why (model, parameter, key, quota)
+        return f"The LLM provider refused the request (HTTP {found.group(1)}): {found.group(2)[:300]}"
     if error.startswith("LLM call failed"):
         return "The LLM provider did not answer (network, API key or quota). Try again later."
     return None
