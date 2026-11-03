@@ -86,12 +86,16 @@ def unexpected_error(error: Exception) -> tuple[Response, int]:
 
 @app.before_request
 def require_api_token() -> None:
-    """Abort with 401 if API_TOKEN is set and the Bearer token does not match."""
+    """Abort with 503 if API_TOKEN is empty, 401 if the Bearer token does not match.
+
+    The API runs with the server's GitLab token and LLM key: without API_TOKEN it stays closed,
+    so a forgotten setting never opens it. The web page uses access codes, not API_TOKEN.
+    """
     # /health is public and the webhook checks its own secret.
     if not request.path.startswith("/api/v1/") or request.path.startswith("/api/v1/webhooks/"):
         return
     if not services.api_token:
-        return
+        abort(503, description="API disabled: set API_TOKEN.")
     header = request.headers.get("Authorization", "")
     given = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
     if not hmac.compare_digest(given, services.api_token):

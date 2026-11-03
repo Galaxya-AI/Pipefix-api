@@ -59,7 +59,8 @@ follow: download the patch, or create the draft merge request.
 | GET  | `/api/v1/runs/<run_id>/patch` | Proposed fix (diff) |
 | POST | `/api/v1/webhooks/gitlab` | GitLab pipeline events: a failed pipeline starts an analysis |
 
-The `/api/v1` routes need `Authorization: Bearer <API_TOKEN>`.
+The `/api/v1` routes need `Authorization: Bearer <API_TOKEN>`; they answer 503 while `API_TOKEN`
+is empty (the web page uses access codes and keeps working). Generate one with `openssl rand -hex 32`.
 
 Example:
 
