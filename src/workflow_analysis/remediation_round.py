@@ -10,6 +10,7 @@ Order of one round (rules in workflow_remediation.transitions):
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from agent_errors.errors import AgentRunError
@@ -28,6 +29,7 @@ from startup.env_values import env_bool, env_int
 from text_tools.failed_tests import failed_test_sources
 from text_tools.log_cleaning import clean_log, error_summary, keep_tail, mask_secrets, strip_ansi
 from tools.tool import Tool
+from workflow_analysis.fix_reuse import REUSE_FIXES, FixCache, failure_key, rebuild
 from workflow_analysis.infra_failure import infra_triage
 from workflow_analysis.task_messages import diagnosis_task, file_contents, fix_task, pipeline_context, review_task
 from workflow_analysis.toolbox import build_run_registry
@@ -80,6 +82,8 @@ class RemediationRound:
         self.dry_run = dry_run
         self.max_fix_attempts = max(1, max_fix_attempts)
         self.auto_retry_flaky = auto_retry_flaky
+        # Key of the failure of the current round, for the cache of approved fixes
+        self.reuse_key = ""
 
     def failed_jobs(self, project: str, pipeline: dict[str, Any]) -> list[dict[str, Any]]:
         """Return the failed jobs that block the pipeline, or every failed job if none blocks it."""
@@ -89,10 +93,59 @@ class RemediationRound:
     def run(self, project: str, pipeline: dict[str, Any], allow_research: bool, history: str = "") -> RoundResult:
         """`history`: the earlier fix attempts on this branch, added to the context of every agent."""
         calls_before = self.llm_calls()
+        self.reuse_key = ""
         try:
-            return self.run_agents(project, pipeline, allow_research, history)
+            result = self.run_agents(project, pipeline, allow_research, history)
         finally:
             self.log_llm_calls(pipeline, calls_before)
+        cache = self.fix_cache()
+        # An approved fix is kept so that the same failure on the same commit needs no LLM call next time
+        if cache is not None and self.reuse_key and result.status == "fix_ready":
+            cache.save(self.reuse_key, result, str(getattr(self.journal, "run_id", "")))
+        result.reuse_key = self.reuse_key
+        return result
+
+    def forget_fix(self, result: RoundResult) -> None:
+        """A fix whose pipeline failed must not be reused: remove it from the cache."""
+        cache = self.fix_cache()
+        key = str(getattr(result, "reuse_key", None) or "")
+        if cache is not None and key:
+            cache.forget(key)
+
+    def fix_cache(self) -> FixCache | None:
+        """The cache of approved fixes, in the runs folder (None when disabled or without a real journal)."""
+        folder = getattr(self.journal, "folder", None)
+        if not REUSE_FIXES or not isinstance(folder, Path):
+            return None
+        return FixCache(folder.parent)
+
+    def reuse_fix(self, changeset: Changeset, result: RoundResult) -> bool:
+        """Fill the round with the fix saved for the same failure on the same commit; True if one was used."""
+        cache = self.fix_cache()
+        data = cache.load(self.reuse_key) if cache is not None and self.reuse_key else None
+        if data is None or not rebuild(data, result):
+            return False
+        files = data["files"]
+        valid = isinstance(files, dict) and all(
+            isinstance(k, str) and isinstance(v, str) and not k.startswith("/") and ".." not in k.split("/")
+            for k, v in files.items()
+        )
+        if not valid:
+            return False
+        for path, content in files.items():
+            changeset.replace_file(path, content)
+        result.diff = changeset.diff()
+        result.files = changeset.changed_files()
+        result.status = "fix_ready"
+        self.journal.log("remediation_round", "fix_reused", {"from_run": data.get("run_id"), "files": sorted(files)})
+        self.mark_agents_done("reused fix")
+        return True
+
+    def mark_agents_done(self, source: str) -> None:
+        """Show the four agents as done on the web page when the round needed none of them."""
+        for agent in ("triage", "diagnosis", "fixer", "reviewer"):
+            self.journal.log(agent, "start", {"source": source})
+            self.journal.log(agent, "finish", {"source": source})
 
     def llm_calls(self) -> dict[str, int]:
         """LLM calls of the run so far, per agent (empty if the runner does not count them)."""
@@ -129,6 +182,11 @@ class RemediationRound:
             excerpt = clean_log(traces[int(job["id"])], CONTEXT_LOG_LINES)
             logs.append(f"Job {job.get('id')} ({job.get('name')}):\n{excerpt}")
         self.log_errors(pipeline, jobs, traces)
+        # The same failure on the same commit: reuse the fix already approved, without any agent
+        if self.fix_cache() is not None:
+            self.reuse_key = failure_key(project, sha, jobs[:MAX_CONTEXT_JOBS], traces)
+            if self.reuse_fix(changeset, result):
+                return result
         context = pipeline_context(project, pipeline, jobs, "\n\n".join(logs))
         # Lint and format errors that ruff fixes on its own cost no LLM call
         autofix = self.autofix(changeset, jobs, traces)
@@ -202,6 +260,7 @@ class RemediationRound:
         result.diff = changeset.diff()
         result.files = changeset.changed_files()
         result.status = "fix_ready"
+        self.mark_agents_done("ruff")
 
     def log_errors(self, pipeline: dict[str, Any], jobs: list[dict[str, Any]], traces: dict[int, str]) -> None:
         """Record the error lines of each failed job, so the web page can show them for this round."""

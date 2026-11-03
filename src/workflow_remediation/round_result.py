@@ -27,6 +27,8 @@ class RoundResult:
     # New content of every changed file
     files: dict[str, str] = field(default_factory=dict)
     error: str = ""
+    # Key of the failure in the cache of approved fixes (empty when the cache is off)
+    reuse_key: str = ""
 
     def as_report(self) -> dict[str, Any]:
         """Plain data for the report, without the file contents."""

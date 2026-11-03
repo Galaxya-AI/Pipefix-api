@@ -315,6 +315,9 @@ class RemediationWorkflow:
                 report["error"] = "Pipeline SHA does not match the proposed fix commit."
                 return "pipeline_sha_mismatch"
             status = outcome_status(finished)
+            if status != "pipeline_fixed":
+                # This fix did not make the pipeline pass: never reuse it for the same failure
+                self.remediation_round.forget_fix(result)
             if status == "pipeline_fixed":
                 self.open_fix_mr(project, pipeline, branch, last_result, report)
                 return "pipeline_fixed"
