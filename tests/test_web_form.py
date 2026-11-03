@@ -249,3 +249,18 @@ def test_a_web_run_can_be_followed_again_after_a_restart(tmp_path: Path) -> None
     # Only the hash of the run key is written, never the key itself
     saved = json.loads((tmp_path / "20261103-174922-dc497d" / "web_owner.json").read_text())
     assert set(saved) == {"gitlab_url", "key_hash"}
+
+
+def test_a_visitor_gets_a_clear_message_after_the_daily_limit(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_module = sys.modules["app"]
+    monkeypatch.setattr(app_module, "build_user_run_function", lambda url, token, tools: fake_run)
+    monkeypatch.setattr(app_module.GitLabClient, "get_project", lambda self, project: {"id": 1})
+    monkeypatch.setattr(app_module.daily_limit, "limit", 1)
+    body = {"access_code": "good-code", "project_url": "https://gitlab.com/group/app"}
+    assert client.post("/web/runs", json=body).status_code == 202
+    wait_for_runs()
+    refused = client.post("/web/runs", json=body)
+    assert refused.status_code == 429
+    assert "Daily limit reached: 1 analyses per access code" in refused.get_json()["message"]

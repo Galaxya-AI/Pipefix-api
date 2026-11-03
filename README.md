@@ -47,6 +47,12 @@ On a free GitLab.com account, project access tokens are not available: use a per
 The page shows the progress of each agent, then the cause, the fix, the review and the diff. Two actions
 follow: download the patch, or create the draft merge request.
 
+Several visitors can use the page at the same time. At most `MAX_PARALLEL_RUNS` runs (default 2) work at
+once in the pod; the others wait as "queued" and start by themselves. Two runs on the same project never
+work at the same time. Each access code may start `DAILY_RUNS_PER_VISITOR` analyses a day (default 10);
+after that the page says so. The LLM calls of the whole pod are spaced by `LLM_MIN_INTERVAL_S` (0.5 s), so
+several runs do not hit the provider's rate limit together. No Redis or database is needed for one pod.
+
 ## API
 
 | Method | Route | Purpose |

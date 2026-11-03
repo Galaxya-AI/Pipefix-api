@@ -14,6 +14,7 @@ from llm.base import LLMClient, LLMProvider, LLMResponse, Message, ToolDefinitio
 from llm.errors import LLMError
 from llm.providers.openai.provider import OpenAIProvider, parse_reasoning_efforts
 from llm.retry import RetryingLLMClient
+from llm.spacing import SpacedLLMClient
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # Local OpenAI-format server (provider "ollama"), e.g. http://localhost:11434/v1
@@ -62,11 +63,11 @@ def build_providers(
 
 
 def build_llm_client(providers: Iterable[LLMProvider] | None = None) -> LLMClient:
-    """Provider routing plus retries; None uses the providers configured in .env.
+    """Provider routing, spacing of the calls and retries; None uses the providers configured in .env.
 
     Raise LLMError if no provider is configured.
     """
     adapters = list(providers) if providers is not None else build_providers()
     if not adapters:
         raise LLMError("No LLM provider configured: set OPENAI_API_KEY or OLLAMA_BASE_URL.")
-    return RetryingLLMClient(ProviderClient(adapters))
+    return RetryingLLMClient(SpacedLLMClient(ProviderClient(adapters)))

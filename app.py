@@ -31,6 +31,7 @@ from typing import Any
 from flask import Flask, Response, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
+from app_runs.daily_limit import daily_limit
 from app_runs.launcher import LaunchError
 from app_runs.thread_launcher import ThreadLauncher
 from connectors.errors.errors import ConnectorError
@@ -67,6 +68,7 @@ app = Flask(__name__)
 services, toolbox = build_api_services()
 # Web runs can be followed again after a restart when the runs folder is a persistent volume
 web_owners.runs_dir = services.store.runs_dir
+daily_limit.runs_dir = services.store.runs_dir
 # Stops the MCP servers when the process stops.
 atexit.register(toolbox.close)
 
@@ -271,6 +273,11 @@ def create_web_run() -> tuple[Response, int]:
         )
     if pipeline_id is not None:
         check_pipeline_to_fix(gitlab, project, pipeline_id)
+    if not daily_limit.take(visitor):
+        abort(
+            429,
+            description=f"Daily limit reached: {daily_limit.limit} analyses per access code. Try again tomorrow.",
+        )
     launcher = ThreadLauncher(build_user_run_function(gitlab_url, gitlab_token, services.tools), services.store)
     run_id = launcher.launch(project, pipeline_id, dry_run=True)
     run_key = secrets.token_urlsafe(32)
