@@ -1,0 +1,13 @@
+# Persistent folder of the runs (journals, reports, patches): they survive a restart of the pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pipefix-runs
+  labels:
+    app: pipefix
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

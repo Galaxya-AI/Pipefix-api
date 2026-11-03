@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import threading
 from pathlib import Path
@@ -231,3 +232,20 @@ def test_api_needs_the_right_bearer_token(client: FlaskClient) -> None:
     assert client.get("/api/v1/tools").status_code == 401
     assert client.get("/api/v1/tools", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/api/v1/tools", headers={"Authorization": "Bearer t"}).status_code == 200
+
+
+def test_a_web_run_can_be_followed_again_after_a_restart(tmp_path: Path) -> None:
+    from web_support import WebOwners
+
+    first = WebOwners()
+    first.runs_dir = tmp_path
+    first["20261103-174922-dc497d"] = ("https://gitlab.com", "hash-of-the-key")
+    # A new process starts with an empty memory and reads the owner from the run's folder
+    restarted = WebOwners()
+    restarted.runs_dir = tmp_path
+    assert restarted.get("20261103-174922-dc497d") == ("https://gitlab.com", "hash-of-the-key")
+    assert restarted.get("unknown-run") is None
+    assert restarted.get("../etc") is None
+    # Only the hash of the run key is written, never the key itself
+    saved = json.loads((tmp_path / "20261103-174922-dc497d" / "web_owner.json").read_text())
+    assert set(saved) == {"gitlab_url", "key_hash"}
