@@ -145,11 +145,14 @@ def test_round_gives_the_files_to_the_fixer_and_counts_the_calls_per_agent() -> 
     assert "## Current content of the files to change" in fixer_task and "return x * 3" in fixer_task
     reviewer_task = llm.calls[1][1]["content"]
     assert "## Changed files after the fix (full content)" in reviewer_task and "return x * 2" in reviewer_task
-    journal.log.assert_any_call(
-        "remediation_round",
-        "llm_calls",
-        {"pipeline": 7, "per_agent": {"fixer": 1, "reviewer": 1}, "round_calls": 2, "run_calls": 2},
-    )
+    calls = [c.args[2] for c in journal.log.call_args_list if c.args[:2] == ("remediation_round", "llm_calls")]
+    assert calls and {key: calls[0][key] for key in ("pipeline", "per_agent", "round_calls", "run_calls")} == {
+        "pipeline": 7,
+        "per_agent": {"fixer": 1, "reviewer": 1},
+        "round_calls": 2,
+        "run_calls": 2,
+    }
+    assert calls[0]["run_tokens"] == {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
 
 
 def test_fix_task_without_files_is_unchanged() -> None:

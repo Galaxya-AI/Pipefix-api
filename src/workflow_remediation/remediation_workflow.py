@@ -147,6 +147,9 @@ class RemediationWorkflow:
         """Notify, add the LLM usage, write report.json and return the report."""
         report["notification"] = self.notifier.notify(project, report, self.dry_run)
         report["usage"] = {"llm_calls": self.runner.usage.total_calls(), "per_agent": self.runner.usage.as_dict()}
+        totals = getattr(self.runner.usage, "totals", None)
+        if callable(totals) and isinstance(totals(), dict):
+            report["usage"]["tokens"] = totals()
         self.journal.write_report(report)
         self.journal.log("workflow", "done", {"status": report.get("status")})
         return report

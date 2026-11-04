@@ -70,3 +70,21 @@ def test_the_page_shows_why_the_provider_refused_the_request() -> None:
     assert reason.startswith("The LLM provider refused the request (HTTP 400): Function tools with reasoning_effort")
     network = agent_failure_reason("LLM call failed for agent 'triage': Network error towards x")
     assert network == "The LLM provider did not answer (network, API key or quota). Try again later."
+
+
+def test_cached_input_tokens_are_read_and_added_up() -> None:
+    from llm.providers.openai.converters import parse_openai_response
+    from llm.usage import UsageTracker
+
+    answer = {
+        "choices": [{"message": {"content": "ok"}}],
+        "usage": {"prompt_tokens": 1000, "completion_tokens": 50, "prompt_tokens_details": {"cached_tokens": 768}},
+    }
+    response = parse_openai_response(answer)
+    assert response.cached_input_tokens == 768
+    assert parse_openai_response({"choices": [{"message": {}}], "usage": {}}).cached_input_tokens == 0
+    usage = UsageTracker()
+    usage.add("fixer", response)
+    usage.add("fixer", response)
+    assert usage.as_dict()["fixer"]["cached_input_tokens"] == 1536
+    assert usage.totals() == {"input_tokens": 2000, "cached_input_tokens": 1536, "output_tokens": 100}

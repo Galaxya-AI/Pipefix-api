@@ -120,7 +120,8 @@ in as few calls as possible: the fixer and the reviewer receive the content of t
 edit in one `propose_edits` call (all applied or none) and finishes in the same answer;
 the error list puts the `FAILED tests/...` lines first, so the diagnosis sees every failed
 test and fewer rounds are needed. The journal records the calls of each round per agent
-(event `llm_calls`). When GitLab reports an infrastructure `failure_reason` for every
+(event `llm_calls`), with the tokens of the run and the part the provider read from its
+prompt cache, billed much cheaper (`run_tokens.cached_input_tokens`; also in the run report). When GitLab reports an infrastructure `failure_reason` for every
 failed job (`runner_system_failure`, `stuck_or_timeout_failure`...), the triage result
 `infra_flaky` is known without an LLM call; every other failure goes to the triage agent.
 Lint and format errors that ruff fixes on its own (the rules the log reports, safe fixes only, with the project's ruff configuration) are fixed before any agent runs: when that fixes every error, the round needs no LLM call (`AUTOFIX_RUFF`). When the same failure comes back on the same commit (a retried pipeline, a webhook sent twice), the fix already approved is reused without any LLM call, unless the pipeline after it failed (`REUSE_FIXES`, `REUSE_TTL_S`). `AGENT_MAX_TURNS` and `MAX_LLM_CALLS_PER_RUN` are safety limits.
