@@ -131,7 +131,8 @@ analysed project should not stop at the first one, for example:
 in the same stage.
 
 **Known limits:** CI rules must run the required jobs on `auto-fix/` branches; a pod
-restart stops a running loop (the commits already made stay on the branch);
+restart stops a running loop (the commits already made stay on the branch; the runs
+themselves are kept on the `pipefix-runs` persistent volume);
 `pipeline_fixed` means GitLab reported success for the last commit, not that every bug
 is fixed. Review the full cumulative diff before merging.
 

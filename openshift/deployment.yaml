@@ -6,6 +6,9 @@ metadata:
     app: pipefix
 spec:
   replicas: 1
+  # The runs volume can be mounted by one pod at a time: stop the old pod before starting the new one
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: pipefix
@@ -52,7 +55,8 @@ spec:
               memory: 512Mi
       volumes:
         - name: runs
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: pipefix-runs
         - name: access-codes
           secret:
             secretName: pipefix-access

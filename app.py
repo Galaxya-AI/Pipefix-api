@@ -65,6 +65,8 @@ FIX_BRANCH_PREFIX = os.getenv("FIX_BRANCH_PREFIX", "auto-fix/")
 app = Flask(__name__)
 
 services, toolbox = build_api_services()
+# Web runs can be followed again after a restart when the runs folder is a persistent volume
+web_owners.runs_dir = services.store.runs_dir
 # Stops the MCP servers when the process stops.
 atexit.register(toolbox.close)
 
