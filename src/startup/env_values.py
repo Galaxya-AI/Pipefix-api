@@ -23,6 +23,15 @@ def env_int(name: str, default: int, minimum: int | None = None) -> int:
     return value
 
 
+def env_float(name: str, default: float) -> float:
+    """Return the number value of `name`, or `default` when it is missing, empty or not a number."""
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
 def env_bool(name: str, default: bool) -> bool:
     """Return True for 1/true/yes/on, False for any other value, `default` when missing or empty."""
     raw = os.getenv(name, "").strip().lower()
