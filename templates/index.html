@@ -31,11 +31,14 @@
            background: linear-gradient(180deg, #0e7490 0%, #083344 26%, var(--panel) 52%, var(--panel) 100%); }
 
   header { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center;
+  /* The name on its own line, above the form */
+  .brand { flex: 1 1 100%; display: flex; align-items: center; gap: 14px; }
+  .logo { width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center;
           background: linear-gradient(135deg, #06b6d4 0%, #155e75 100%); }
-  .wordmark { font-size: 18px; font-weight: 800; color: var(--ink); letter-spacing: -.3px; }
-  form { flex: 1 1 640px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-end; }
+  .logo svg { width: 26px; height: 26px; }
+  .wordmark { font-size: 30px; font-weight: 800; color: var(--ink); letter-spacing: -.8px; line-height: 1.1; }
+  .tagline { margin: 2px 0 0; font-size: 13.5px; color: #cffafe; }
+  form { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .field { position: relative; display: flex; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   input { height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--card-2); color: var(--ink);
@@ -168,7 +171,10 @@
   <header>
     <div class="brand">
       <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M6.5 12.5l3.6 3.6L17.5 8.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="wordmark">PipeFix</span>
+      <div>
+        <div class="wordmark">PipeFix</div>
+        <p class="tagline">Finds why a GitLab pipeline failed and fixes it</p>
+      </div>
     </div>
     <form id="form">
       <div class="field f-project"><label class="sr" for="project">Project or pipeline address</label>
