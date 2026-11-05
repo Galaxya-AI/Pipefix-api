@@ -32,7 +32,8 @@ The service listens on http://localhost:8000.
 
 ## Web page (PipeFix)
 
-Open http://localhost:8000 and enter your access code (given by the owner) and the
+Open http://localhost:8000 and enter your access code (given by the owner; with `ACCESS_REQUEST_EMAIL` set,
+the page has an "Ask for one by email" link) and the
 project address as shown in your browser, for example `https://gitlab.com/group/my-project`
 (gitlab.com or a self-hosted GitLab; a pipeline page address also gives the pipeline number).
 Optionally add a pipeline number (by default the latest failed pipeline) and a GitLab access token:
