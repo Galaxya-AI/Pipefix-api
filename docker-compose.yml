@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    image: ci-remediation:0.2.0
+    image: pipefix-api:local
     env_file: .env
     command: ["gunicorn", "app:app", "--bind=0.0.0.0:8000", "--workers=${GUNICORN_WORKERS:-2}", "--threads=${GUNICORN_THREADS:-4}", "--timeout=${GUNICORN_TIMEOUT:-60}", "--graceful-timeout=30", "--access-logfile=-", "--error-logfile=-"]
     environment:
@@ -22,7 +22,7 @@ services:
       retries: 3
 
   worker:
-    image: ci-remediation:0.2.0
+    image: pipefix-api:local
     pull_policy: never
     command: ["rq", "worker", "--url", "redis://redis:6379/0", "--with-scheduler", "high", "default"]
     env_file: .env

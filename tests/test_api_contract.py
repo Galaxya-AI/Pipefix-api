@@ -17,9 +17,9 @@ from flask.testing import FlaskClient
 from jsonschema import Draft202012Validator
 
 from journal.run_journal import RunJournal
-from test_web_fix_until_green import PIPELINE, fake_loop
-from test_web_form import client, fake_run, services, wait_for_runs  # noqa: F401  (pytest fixtures)
-from web_support_cors import add_cors_headers, allowed_origins
+from test_visitor_api import client, fake_run, services, wait_for_runs  # noqa: F401  (pytest fixtures)
+from test_visitor_fix_until_green import PIPELINE, fake_loop
+from visitor_api.cors import add_cors_headers, allowed_origins
 
 SPEC: dict[str, Any] = yaml.safe_load(Path(__file__).parent.parent.joinpath("openapi.yaml").read_text("utf-8"))
 METHODS = {"get", "post", "put", "patch", "delete"}
@@ -219,7 +219,7 @@ def test_cors_helper_leaves_requests_without_origin_alone() -> None:
 
 
 def test_the_open_merge_request_of_an_earlier_fix_is_shown_and_crashes_are_not_detailed() -> None:
-    from web_support import UNEXPECTED_ERROR, public_run
+    from visitor_api.views import UNEXPECTED_ERROR, public_run
 
     view = public_run({"status": "dry_run_patch_ready", "previous_merge_request_url": "https://mr/3", "rounds": []})
     assert view is not None and view["merge_request_url"] == "https://mr/3"

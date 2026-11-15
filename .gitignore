@@ -9,6 +9,13 @@ openshift/access-codes
 # Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/

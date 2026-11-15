@@ -1,48 +1,70 @@
-# Multi-agent system for failed GitLab pipelines
+# PipeFix API
 
-When a GitLab CI pipeline fails, this service finds the cause and proposes a fix.
-Agents work in a fixed order: triage, diagnosis (with web research when the
-error is unknown), fixer and reviewer. A fix is only proposed once the reviewer
-approves it, and it is published as a draft merge request, so a human always
-decides before merging.
+When a GitLab CI pipeline fails, PipeFix finds the cause and proposes a fix. Four agents work
+in a fixed order: **triage**, **diagnosis** (with web research when the error is unknown),
+**fixer** and **reviewer**. A fix is only proposed once the reviewer approves it, and it is
+published as a **draft** merge request: a human always decides before merging.
 
-This is a proof of concept: one pipeline is analysed at a time. A single
-proposal is **not** proof that the pipeline has passed. Further failing pipelines
-can be analysed independently. If a draft MR remains open for the *same*
-pipeline, a new run still performs diagnosis; its fix uses an isolated branch
-(`auto-fix/pipeline-<id>-retry-<run_id>`) so it does not overwrite the pending MR.
-Both proposals require human review. Closed MRs are not treated as successful fixes.
+This repository is the backend: agents, GitLab access, runs and a JSON API. The web interface
+is a separate application, [pipefix-web](https://gitlab.com/malabidi/pipefix-web). The contract
+between them is [`openapi.yaml`](openapi.yaml), also served at `GET /api/openapi.yaml`. The API
+works without the interface (curl, scripts, GitLab webhooks).
 
-**Important limitation:** no automatic merge or guarantee of a green pipeline.
-When `WAIT_FOR_PIPELINE=false`, PipeFix proposes a draft MR but does not verify
-that merging it will make the target pipeline pass. When enabled, the optional
-pipeline wait/round loop applies only to the fix branch and respects `MAX_ROUNDS`.
-If the failure comes from additional tests, run PipeFix on the newer failed
-pipeline after updating the target branch; avoid merging incompatible fixes.
+## Quick start
 
-
-## Run
+**Checks, without any key, GitLab access or LLM** (the agents' models and GitLab are simulated in
+the tests):
 
 ```bash
-cp .env.example .env          # GitLab token, LLM key and the model of each agent
-docker compose up --build -d
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest -q          # unit, workflow and API contract tests
+ruff check .
+mypy src app.py
 ```
 
-The service listens on http://localhost:8000.
+**Run the API locally** (it needs a GitLab token and an LLM provider, see `.env.example`):
 
-## Architecture
+```bash
+cp .env.example .env                      # fill in GITLAB_TOKEN, OPENAI_API_KEY or OLLAMA_BASE_URL, models
+echo "me:my-code" > ~/pipefix-access-codes # access codes of the visitor API, one "name:code" per line
+set -a; source .env; set +a
+export ACCESS_CODES_FILE=~/pipefix-access-codes
+PYTHONPATH=src python app.py              # http://localhost:8000
+```
 
-PipeFix is two applications, deployed and versioned on their own:
+Or with Docker (API, Redis queue and worker): `docker compose up --build -d`.
 
-| Application | Repository | Role |
-|---|---|---|
-| **pipefix-api** (this one) | Python, Flask | Agents, GitLab access, runs, JSON API. Serves no page. |
-| **pipefix-web** | Vue 3, TypeScript | The web interface. Calls the visitor API below. |
+A local model can replace OpenAI: set `OLLAMA_BASE_URL=http://localhost:11434/v1` and
+`<AGENT>_LLM_PROVIDER=ollama` with a model that supports tool calls.
 
-The contract between them is [`openapi.yaml`](openapi.yaml), also served at `GET /api/openapi.yaml`.
-A test checks that every route of the application is described there, and that the visitor API
-answers match its schemas. The API works without the interface (curl, scripts, GitLab webhooks),
-and the interface has a demo mode that works without the API.
+## Project structure
+
+```
+app.py                  Flask application: every route of the API
+openapi.yaml            API contract (OpenAPI 3.1), checked by tests/test_api_contract.py
+src/
+  agents/               the agents: triage, diagnosis, research, fixer, reviewer, and their outputs
+  agent_base/           settings of an agent; agent_runner/: runs an agent until it gives a valid output
+  agent_errors/         errors raised while running agents
+  llm/                  LLM layer: providers (OpenAI, Ollama), retries, call spacing, token usage
+  tools/                tool registry and the tools of the agents; mcp_runtime/: tools from MCP servers
+  connectors/           GitLab and web search connectors, and a template for a new one
+  changeset/            proposed edits (all or nothing), static check (pyflakes), ruff autofix
+  text_tools/           log cleaning, error lines and code of the failed tests, without an LLM call
+  workflow_analysis/    one round: triage to review, reuse of a known fix, earlier attempts
+  workflow_remediation/ the rounds until the pipeline passes, and their results
+  workflow_publication/ commit, draft merge request, pipeline wait, failure notification
+  app_runs/             run store, launchers (threads, at most MAX_PARALLEL_RUNS), daily limit
+  redis_jobs/           Redis queue and branch lock, for several pods or workers
+  visitor_api/          access codes, inputs, views and CORS of the visitor API
+  journal/              journal of everything the agents do during a run
+  policy/               data policy: confidential projects never go to external LLMs
+  logging_module/       logs on the standard output, errors to Sentry (SENTRY_DSN)
+  startup/              settings read from the environment, services built at start-up
+tests/                  offline tests (no network, no key)
+openshift/              Deployment, Service, Route, volume and setup.sh for a new namespace
+```
 
 ## Visitor API (used by the web interface)
 
@@ -110,7 +132,6 @@ curl -X POST localhost:8000/api/v1/runs \
 curl localhost:8000/api/v1/runs/20261026-175201-a3f2c1/patch -H "Authorization: Bearer $API_TOKEN"
 ```
 
-
 ## Fix until the pipeline passes
 
 A failed pipeline often hides errors: an import error stops pytest before any test
@@ -128,11 +149,11 @@ The run stops without a merge request on `max_rounds_reached`, `repeated_failure
 (the same error lines came back), `pipeline_timeout` or a SHA mismatch; the fixes
 already made stay on the branch.
 
-**Web interface.** After an analysis, *Fix until the pipeline passes* commits the fix the
-visitor saw, then runs the rounds; the interface shows each round: the error lines of the
-failed jobs, the cause, the fix, the commit and the next pipeline. *Create merge request*
-still publishes the shown fix alone, without waiting for CI. Both need a token with
-the `api` scope, kept only while the run lasts.
+**Visitor API.** `POST /web/runs/<run_id>/fix-until-green` commits the fix the visitor saw,
+then runs the rounds; `GET /web/runs/<run_id>` gives each round: the error lines of the
+failed jobs, the cause, the fix, the commit and the next pipeline. `POST .../publish` still
+publishes the fix alone, without waiting for CI. Both need a token with the `api` scope,
+kept only while the run lasts.
 
 **API.** `POST /api/v1/runs` with `"apply": true` runs the same rounds when
 `WAIT_FOR_PIPELINE=true`.
@@ -174,18 +195,11 @@ themselves are kept on the `pipefix-runs` persistent volume);
 `pipeline_fixed` means GitLab reported success for the last commit, not that every bug
 is fixed. Review the full cumulative diff before merging.
 
-For verification in a development environment with dependencies installed:
+## Deployment
 
-```bash
-python -m compileall -q src app.py
-ruff check .
-mypy src app.py
-pytest -q
-```
+The GitLab pipeline (`.gitlab-ci.yml`) uses the group template: security scans, tests, Docker
+image, then deployment to OpenShift (DEV on every merge into `develop`, REC on a `REC_NNN` tag).
+First time in a namespace: copy `openshift/setup.env.example` to `openshift/setup.env`, fill it
+in, then run `./openshift/setup.sh` after `oc login`. It creates the secrets (`pipefix-env`,
+registry, access codes) and the routes `/web` and `/api` of `PIPEFIX_HOST`.
 
-### Structure des routes Flask
-
-`app.py` conserve la création de l'application, les hooks HTTP, les déclarations
-de routes et leurs gestionnaires Flask. Les fonctions auxiliaires indépendantes
-(access codes, parsing des URL GitLab, clés des runs, affichage des étapes et des
-tours, lecture du lien de MR) sont dans `src/web_support.py`.

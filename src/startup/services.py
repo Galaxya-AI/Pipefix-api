@@ -166,5 +166,8 @@ def build_api_services() -> tuple[ApiServices, Toolbox]:
         default_dry_run=DRY_RUN,
     )
     if not API_TOKEN:
-        print("[warning] API_TOKEN is empty: the API (/api/v1) is disabled; the web page still works.", file=sys.stderr)
+        print(
+            "[warning] API_TOKEN is empty: the server API (/api/v1) is disabled; the visitor API (/web) still works.",
+            file=sys.stderr,
+        )
     return services, toolbox

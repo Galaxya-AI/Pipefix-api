@@ -1,4 +1,4 @@
-"""Cross-origin access for the web frontend, which is deployed on its own and may live on another domain.
+"""Cross-origin access for the web interface, which is deployed on its own and may live on another domain.
 
 Only the visitor API (/web/...), /health and the API description are opened to browsers, and only
 for the origins listed in CORS_ORIGINS. The server API (/api/v1/...) is called with API_TOKEN by

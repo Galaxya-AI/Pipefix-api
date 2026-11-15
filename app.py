@@ -4,7 +4,7 @@ The backend serves JSON only. The web interface is a separate application (pipef
 the visitor API below; it can be deployed on its own domain (see CORS_ORIGINS). Every route is
 described in openapi.yaml, served at /api/openapi.yaml.
 
-Development: python app.py
+Development: PYTHONPATH=src python app.py (the settings are read from the environment, see .env.example)
 Production:  gunicorn app:app (see docker-compose.yml)
 
 Routes:
@@ -45,21 +45,10 @@ from connectors.errors.errors import ConnectorError
 from connectors.gitlab.client import GitLabClient
 from journal.run_journal import RunJournal
 from startup.services import build_api_services, build_user_loop_function, build_user_run_function
-from web_support import (
-    access_owner,
-    access_request_email,
-    check_pipeline_to_fix,
-    parse_project_url,
-    public_run,
-    published_merge_request,
-    read_pipeline_number,
-    round_views,
-    secret_hash,
-    stage_states,
-    web_owner,
-    web_owners,
-)
-from web_support_cors import add_cors_headers
+from visitor_api.access import access_owner, access_request_email, secret_hash, web_owner, web_owners
+from visitor_api.cors import add_cors_headers
+from visitor_api.inputs import check_pipeline_to_fix, parse_project_url, read_pipeline_number
+from visitor_api.views import public_run, published_merge_request, round_views, stage_states
 from workflow_publication.publisher import MERGE_REQUEST_FILE, load_saved_fix, publish_saved_fix, saved_start_pipeline
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
@@ -281,7 +270,7 @@ def create_web_run() -> tuple[Response, int]:
 
     JSON body: {"access_code", "project_url", "gitlab_token", "pipeline_id" (optional)}.
     The token is required (read_api to analyse, api to publish the fix). It is used for this
-    run only and never stored. The answer carries a run key the page sends back to read or publish the run.
+    run only and never stored. The answer carries a run key the client sends back to read or publish the run.
     """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -370,7 +359,7 @@ def publish_web_run(run_id: str) -> Response:
 def fix_web_run_until_green(run_id: str) -> Response:
     """Publish the fix shown to the visitor, then keep fixing until the pipeline passes (needs the api scope).
 
-    The loop runs in the background as a new run; the page follows it with the same run key.
+    The loop runs in the background as a new run; the client follows it with the same run key.
     The draft merge request opens only when GitLab reports a green pipeline.
     """
     gitlab_url = web_owner(run_id)

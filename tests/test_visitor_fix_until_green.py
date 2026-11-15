@@ -1,4 +1,4 @@
-"""Web button "fix until the pipeline passes": endpoint, round view of the page, saved fix then new rounds."""
+"""Visitor API "fix until the pipeline passes": endpoint, round views, saved fix then new rounds."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from flask.testing import FlaskClient
 
 import workflow_remediation.remediation_workflow as remediation_workflow
 from journal.run_journal import RunJournal
-from test_web_form import client, fake_run, services, wait_for_runs  # noqa: F401  (pytest fixtures)
-from web_support import round_views
+from test_visitor_api import client, fake_run, services, wait_for_runs  # noqa: F401  (pytest fixtures)
+from visitor_api.views import round_views
 from workflow_remediation.remediation_workflow import RemediationWorkflow
 
 PIPELINE = {"id": 41, "ref": "main", "sha": "analysed-sha", "web_url": "https://gitlab.example/p/41"}
@@ -175,7 +175,7 @@ def test_saved_fix_is_committed_first_then_new_rounds_until_green(monkeypatch: p
 
 
 def test_visitor_sees_why_an_agent_stopped() -> None:
-    from web_support import public_run
+    from visitor_api.views import public_run
 
     run = {"status": "reviewer_failed", "rounds": [{"error": "LLM call limit of the run reached (20)."}]}
     shown = public_run(run)

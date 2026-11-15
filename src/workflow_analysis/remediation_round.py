@@ -45,7 +45,7 @@ AUTO_RETRY_FLAKY = env_bool("AUTO_RETRY_FLAKY", False)
 CONTEXT_LOG_LINES = env_int("CONTEXT_LOG_LINES", 150)
 MAX_CONTEXT_JOBS = env_int("MAX_CONTEXT_JOBS", 5, minimum=1)
 
-# Error lines of each failed job shown on the web page for every round
+# Error lines of each failed job given to the visitor API for every round
 ERRORS_SHOWN_PER_JOB = 30
 
 # Code of the failed test functions given to every agent (characters in all)
@@ -142,7 +142,7 @@ class RemediationRound:
         return True
 
     def mark_agents_done(self, source: str) -> None:
-        """Show the four agents as done on the web page when the round needed none of them."""
+        """Mark the four agents as done in the journal when the round needed none of them."""
         for agent in ("triage", "diagnosis", "fixer", "reviewer"):
             self.journal.log(agent, "start", {"source": source})
             self.journal.log(agent, "finish", {"source": source})
@@ -269,7 +269,7 @@ class RemediationRound:
         self.mark_agents_done("ruff")
 
     def log_errors(self, pipeline: dict[str, Any], jobs: list[dict[str, Any]], traces: dict[int, str]) -> None:
-        """Record the error lines of each failed job, so the web page can show them for this round."""
+        """Record the error lines of each failed job, so the visitor API can give them for this round."""
         shown = []
         for job in jobs[:MAX_CONTEXT_JOBS]:
             cleaned = mask_secrets(strip_ansi(traces.get(int(job["id"]), "")))
@@ -363,7 +363,7 @@ class RemediationRound:
         except AgentRunError as error:
             result.status = f"{agent_name}_failed"
             result.error = str(error)
-            # For the developers: the page only says that the analysis could not finish.
+            # For the developers: visitors only learn that the analysis could not finish.
             self.journal.log(agent_name, "agent_failed", {"error": str(error)})
             return None
 

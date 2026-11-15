@@ -32,9 +32,6 @@ class UsageTracker:
             "output_tokens": sum(self.output_tokens.values()),
         }
 
-    def total_tokens(self) -> int:
-        return sum(self.input_tokens.values()) + sum(self.output_tokens.values())
-
     def as_dict(self) -> dict[str, dict[str, int]]:
         return {
             name: {

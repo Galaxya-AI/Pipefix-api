@@ -1,4 +1,4 @@
-"""Daily limit of web runs per visitor (access code), to keep the LLM bill under control.
+"""Daily limit of visitor runs per access code, to keep the LLM bill under control.
 
 The counts are kept in the runs folder (_daily_runs/<day>.json), so a restart of the
 pod does not reset them. DAILY_RUNS_PER_VISITOR=0 removes the limit.
