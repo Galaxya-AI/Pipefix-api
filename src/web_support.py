@@ -18,10 +18,13 @@ from connectors.gitlab.client import GitLabClient
 from workflow_publication.publisher import MERGE_REQUEST_FILE
 
 ACCESS_CODES_FILE = os.getenv("ACCESS_CODES_FILE", "/etc/pipefix/access-codes")
-# Address that receives the access code requests ("Ask for one" link on the page); empty: no link.
+# Address that receives the access code requests ("Ask for one" link of the interface); empty: no link.
 ACCESS_REQUEST_EMAIL = os.getenv("ACCESS_REQUEST_EMAIL", "").strip()
 PIPELINE_IN_URL = re.compile(r"/-/pipelines/(\d+)")
 STAGES = ("triage", "diagnosis", "fixer", "reviewer")
+UNEXPECTED_ERROR = (
+    "The analysis stopped on an unexpected error. Try again; if it happens again, tell the owner of PipeFix."
+)
 
 
 class WebOwners:
@@ -192,7 +195,7 @@ def agent_failure_reason(error: str) -> str | None:
 
 
 def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Only what the page shows: never the tools the agents called, their prompts, usage or settings."""
+    """Only what the interface shows: never the tools the agents called, their prompts, usage or settings."""
     if run is None:
         return None
     last = (run.get("rounds") or [{}])[-1] or {}
@@ -208,8 +211,14 @@ def public_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
         if str(run.get("status", "")).endswith("_failed")
         else last.get("error"),
     }
-    keys = ("status", "project", "error", "merge_request_url", "merge_request", "fix_branch")
+    keys = ("status", "project", "error", "merge_request", "fix_branch")
     view = {key: run.get(key) for key in keys if run.get(key)}
+    # An open merge request of an earlier fix for the same pipeline
+    if run.get("previous_merge_request_url"):
+        view["merge_request_url"] = run["previous_merge_request_url"]
+    # A crash: its text (exception, paths) stays in the logs; the visitor gets a sentence to act on
+    if run.get("status") == "error" and view.get("error"):
+        view["error"] = UNEXPECTED_ERROR
     view["rounds"] = [shown] if run.get("rounds") else []
     return view
 

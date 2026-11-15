@@ -1,0 +1,615 @@
+openapi: 3.1.0
+info:
+  title: PipeFix API
+  version: 1.0.0
+  summary: Multi-agent system that diagnoses failed GitLab pipelines and fixes them.
+  description: |
+    Two groups of routes:
+
+    - **Visitor API** (`/web/...`): used by the web interface (pipefix-web). A visitor gives an
+      access code and their own GitLab token; each run is then read with the run key returned
+      when it started. Browsers may call it from the origins listed in `CORS_ORIGINS`.
+    - **Server API** (`/api/v1/...`): for servers and scripts, with the Bearer token `API_TOKEN`.
+      It runs with the server's own GitLab token. Not open to browsers.
+
+    Errors are always JSON: `{"error": "<HTTP reason>", "message": "<what to do>"}`.
+servers:
+  - url: /
+    description: Same host as the interface, or the address of the API
+tags:
+  - name: service
+    description: Information about the service
+  - name: visitor
+    description: Analyses started from the web interface
+  - name: server
+    description: Runs started by servers and GitLab webhooks
+
+paths:
+  /:
+    get:
+      tags: [service]
+      operationId: getRoot
+      summary: Name and version of the API
+      responses:
+        "200":
+          description: The API answers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RootInfo" }
+
+  /health:
+    get:
+      tags: [service]
+      operationId: getHealth
+      summary: Liveness check
+      responses:
+        "200":
+          description: The process is alive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /api/openapi.yaml:
+    get:
+      tags: [service]
+      operationId: getOpenApi
+      summary: This description of the API
+      responses:
+        "200":
+          description: OpenAPI 3.1 document
+          content:
+            application/yaml:
+              schema: { type: string }
+
+  /web/config:
+    get:
+      tags: [visitor]
+      operationId: getWebConfig
+      summary: Settings the interface needs before the first analysis
+      responses:
+        "200":
+          description: Public settings (never a secret)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebConfig" }
+
+  /web/runs:
+    post:
+      tags: [visitor]
+      operationId: createWebRun
+      summary: Analyse the latest failed pipeline (or a given one) of the visitor's project
+      description: |
+        Nothing is written to GitLab: the run proposes a fix (dry run). The GitLab token is used for
+        this run only and never stored. The answer carries the run key, needed to read or publish the run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebRunRequest" }
+      responses:
+        "202":
+          description: The analysis started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebRunStarted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /web/runs/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [visitor]
+      operationId: getWebRun
+      summary: Progress, result, rounds and patch of a visitor's run
+      description: Poll it every few seconds while `run.status` is `queued` or `running`.
+      security:
+        - runKey: []
+      responses:
+        "200":
+          description: The state of the run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebRunView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /web/runs/{run_id}/publish:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [visitor]
+      operationId: publishWebRun
+      summary: Publish the proposed fix as a draft merge request
+      security:
+        - runKey: []
+          gitlabToken: []
+      responses:
+        "200":
+          description: The draft merge request was created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MergeRequestPublished" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+
+  /web/runs/{run_id}/fix-until-green:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [visitor]
+      operationId: fixWebRunUntilGreen
+      summary: Commit the fix, then fix the new errors round after round until the pipeline passes
+      description: |
+        Starts a new run (the loop), followed with `GET /web/runs/{run_id}` and the same run key.
+        The draft merge request opens only when GitLab reports a green pipeline. Asked twice, it
+        returns the same loop.
+      security:
+        - runKey: []
+          gitlabToken: []
+      responses:
+        "200":
+          description: The loop started, or was already started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoopStarted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/tools:
+    get:
+      tags: [server]
+      operationId: listTools
+      summary: Tools the agents can use
+      security:
+        - bearerToken: []
+      responses:
+        "200":
+          description: The tools
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /api/v1/runs:
+    get:
+      tags: [server]
+      operationId: listRuns
+      summary: Runs of the server
+      security:
+        - bearerToken: []
+      responses:
+        "200":
+          description: The runs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs:
+                    type: array
+                    items: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+    post:
+      tags: [server]
+      operationId: createRun
+      summary: Start a run with the server's GitLab token
+      security:
+        - bearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunRequest" }
+      responses:
+        "202":
+          description: The run started (or the same run was already queued)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunStarted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /api/v1/runs/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [server]
+      operationId: getRun
+      summary: Status of a running run, or the full report of a finished one
+      security:
+        - bearerToken: []
+      responses:
+        "200":
+          description: Status or report
+          content:
+            application/json:
+              schema: { type: object, required: [status], properties: { status: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{run_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [server]
+      operationId: getRunEvents
+      summary: Journal events of a run
+      security:
+        - bearerToken: []
+      responses:
+        "200":
+          description: The events, in order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, events]
+                properties:
+                  run_id: { type: string }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/JournalEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/runs/{run_id}/patch:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [server]
+      operationId: getRunPatch
+      summary: Patch proposed by a run
+      security:
+        - bearerToken: []
+      responses:
+        "200":
+          description: Unified diff
+          content:
+            text/x-diff:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/webhooks/gitlab:
+    post:
+      tags: [server]
+      operationId: receiveGitLabWebhook
+      summary: GitLab "Pipeline events" webhook
+      description: |
+        In GitLab: Settings > Webhooks, URL `<api>/api/v1/webhooks/gitlab`, secret token =
+        `GITLAB_WEBHOOK_SECRET`, trigger "Pipeline events". Only failed pipelines start a run;
+        the pipelines of PipeFix's own fix branches are ignored.
+      security:
+        - webhookSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "202":
+          description: A run started, or the event was ignored (with the reason)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookAnswer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: The API_TOKEN of the deployment
+    runKey:
+      type: apiKey
+      in: header
+      name: X-Run-Key
+      description: The run key returned by POST /web/runs
+    gitlabToken:
+      type: apiKey
+      in: header
+      name: X-Gitlab-Token
+      description: The visitor's GitLab token, with the api scope
+    webhookSecret:
+      type: apiKey
+      in: header
+      name: X-Gitlab-Token
+      description: The secret token of the GitLab webhook (GITLAB_WEBHOOK_SECRET)
+
+  parameters:
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,80}$" }
+
+  responses:
+    BadRequest:
+      description: The request is incomplete or invalid; the message says what to change
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or wrong token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Unknown access code
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Unknown run, or a run key that does not match
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The run has no fix to publish, or it was already published
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unprocessable:
+      description: Nothing to run, e.g. no failed pipeline
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Daily limit of the access code reached
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadGateway:
+      description: GitLab refused the request or cannot be reached
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServiceUnavailable:
+      description: The feature is disabled in this deployment (API_TOKEN or GITLAB_WEBHOOK_SECRET not set)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, examples: ["Bad Request"] }
+        message: { type: string, examples: ["The project address is required."] }
+
+    RootInfo:
+      type: object
+      required: [name, version, openapi]
+      properties:
+        name: { type: string, const: PipeFix API }
+        version: { type: string, examples: ["develop-1a2b3c4d"] }
+        openapi: { type: string, const: /api/openapi.yaml }
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+
+    WebConfig:
+      type: object
+      required: [version, access_request_email, daily_runs_per_visitor]
+      properties:
+        version: { type: string }
+        access_request_email:
+          type: string
+          description: Address of the "Ask for an access code" link; empty when there is none
+        daily_runs_per_visitor:
+          type: integer
+          minimum: 0
+          description: Analyses allowed per access code and per day; 0 means no limit
+
+    WebRunRequest:
+      type: object
+      required: [access_code, project_url, gitlab_token]
+      properties:
+        access_code: { type: string, minLength: 1 }
+        project_url:
+          type: string
+          format: uri
+          description: Address of a GitLab project, or of a pipeline page (it then gives the pipeline number)
+          examples: ["https://gitlab.com/group/project"]
+        gitlab_token:
+          type: string
+          minLength: 1
+          description: Personal access token; read_api to analyse, api to publish the fix
+        pipeline_id:
+          description: Optional pipeline number, "123" or "#123"; empty means the latest failed pipeline
+          oneOf:
+            - { type: integer, minimum: 1 }
+            - { type: string }
+
+    WebRunStarted:
+      type: object
+      required: [run_id, run_key, project]
+      properties:
+        run_id: { type: string }
+        run_key: { type: string, description: Send it back in the X-Run-Key header }
+        project: { type: string, examples: ["group/project"] }
+
+    WebRunView:
+      type: object
+      required: [run, stages, rounds, patch, merge_request]
+      properties:
+        run:
+          description: Null while the run has not written its status yet
+          oneOf:
+            - { $ref: "#/components/schemas/PublicRun" }
+            - { type: "null" }
+        stages:
+          type: array
+          items: { $ref: "#/components/schemas/Stage" }
+        rounds:
+          type: array
+          items: { $ref: "#/components/schemas/RoundView" }
+        patch: { type: [string, "null"], description: Unified diff of the proposed fix }
+        merge_request: { type: [string, "null"], description: Address of the merge request published from the page }
+
+    PublicRun:
+      type: object
+      required: [rounds]
+      properties:
+        status:
+          type: string
+          description: |
+            `queued` and `running` while the run goes on. When it ends, for example:
+            `dry_run_patch_ready`, `fix_already_proposed`, `not_fixable_by_code`, `infra_flaky`,
+            `review_rejected`, `static_check_failed`, `no_failed_pipeline`, `pipeline_fixed`,
+            `max_rounds_reached`, `repeated_failure`, `error`, or `<agent>_failed`.
+        project: { type: string }
+        error: { type: string }
+        merge_request_url: { type: string, description: A merge request already waiting for this pipeline }
+        merge_request: { type: string, description: The merge request opened by the loop }
+        fix_branch: { type: string }
+        rounds:
+          type: array
+          maxItems: 1
+          description: The last round only
+          items: { $ref: "#/components/schemas/PublicRound" }
+
+    PublicRound:
+      type: object
+      required: [diagnosis, fix, review, error]
+      properties:
+        diagnosis:
+          type: object
+          required: [root_cause, introduced_by]
+          properties:
+            root_cause: { type: [string, "null"] }
+            introduced_by: { type: [string, "null"], description: Commit that introduced the error }
+        fix:
+          type: object
+          required: [summary]
+          properties:
+            summary: { type: [string, "null"] }
+        review:
+          type: object
+          required: [comment]
+          properties:
+            comment: { type: [string, "null"] }
+        error: { type: [string, "null"] }
+
+    Stage:
+      type: object
+      required: [name, state]
+      properties:
+        name: { type: string, enum: [triage, diagnosis, fixer, reviewer] }
+        state: { type: string, enum: [pending, running, done, stopped] }
+
+    RoundView:
+      type: object
+      required: [number, pipeline]
+      properties:
+        number: { type: [integer, "null"] }
+        pipeline: { type: [integer, "null"], description: Pipeline the round starts from }
+        pipeline_url: { type: [string, "null"] }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/JobErrors" }
+        status: { type: [string, "null"], description: "Result of the agents, e.g. fix_ready" }
+        cause: { type: [string, "null"] }
+        fix: { type: [string, "null"] }
+        files:
+          type: [array, "null"]
+          items: { type: string }
+        commit:
+          type: object
+          required: [sha, url]
+          properties:
+            sha: { type: [string, "null"] }
+            url: { type: [string, "null"] }
+        result:
+          type: object
+          required: [status, pipeline, url]
+          description: Pipeline GitLab ran on the commit of the fix
+          properties:
+            status: { type: [string, "null"], examples: ["success", "failed"] }
+            pipeline: { type: [integer, "null"] }
+            url: { type: [string, "null"] }
+
+    JobErrors:
+      type: object
+      required: [job, url, lines]
+      properties:
+        job: { type: [string, "null"] }
+        url: { type: [string, "null"] }
+        lines:
+          type: array
+          items: { type: string }
+
+    MergeRequestPublished:
+      type: object
+      required: [merge_request]
+      properties:
+        merge_request: { type: string }
+
+    LoopStarted:
+      type: object
+      required: [run_id]
+      properties:
+        run_id: { type: string }
+
+    ToolList:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          items:
+            type: object
+            required: [name, description, tags, read_only]
+            properties:
+              name: { type: string }
+              description: { type: string }
+              tags: { type: array, items: { type: string } }
+              read_only: { type: boolean }
+
+    RunRequest:
+      type: object
+      required: [project]
+      properties:
+        project: { type: string, examples: ["group/project"] }
+        pipeline_id: { type: integer, minimum: 1, description: Optional; the latest failed pipeline by default }
+        apply: { type: boolean, default: false, description: "true: publish the fix as a draft merge request" }
+
+    RunStarted:
+      type: object
+      required: [run_id, status_url]
+      properties:
+        run_id: { type: string }
+        status_url: { type: string }
+
+    JournalEvent:
+      type: object
+      required: [actor, event]
+      properties:
+        actor: { type: string }
+        event: { type: string }
+        data: { type: object }
+
+    WebhookAnswer:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [started, ignored] }
+        run_id: { type: string }
+        reason: { type: string }

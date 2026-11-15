@@ -30,35 +30,61 @@ docker compose up --build -d
 
 The service listens on http://localhost:8000.
 
-## Web page (PipeFix)
+## Architecture
 
-Open http://localhost:8000 and enter your access code (given by the owner; with `ACCESS_REQUEST_EMAIL` set,
-the page has an "Ask for one by email" link) and the
-project address as shown in your browser, for example `https://gitlab.com/group/my-project`
-(gitlab.com or a self-hosted GitLab; a pipeline page address also gives the pipeline number).
-Optionally add a pipeline number (by default the latest failed pipeline). A GitLab access token is required:
+PipeFix is two applications, deployed and versioned on their own:
+
+| Application | Repository | Role |
+|---|---|---|
+| **pipefix-api** (this one) | Python, Flask | Agents, GitLab access, runs, JSON API. Serves no page. |
+| **pipefix-web** | Vue 3, TypeScript | The web interface. Calls the visitor API below. |
+
+The contract between them is [`openapi.yaml`](openapi.yaml), also served at `GET /api/openapi.yaml`.
+A test checks that every route of the application is described there, and that the visitor API
+answers match its schemas. The API works without the interface (curl, scripts, GitLab webhooks),
+and the interface has a demo mode that works without the API.
+
+## Visitor API (used by the web interface)
+
+A visitor gives an access code (given by the owner; `ACCESS_REQUEST_EMAIL` adds an "Ask for one by email"
+link in the interface), the address of a GitLab project as shown in the browser, for example
+`https://gitlab.com/group/my-project` (gitlab.com or a self-hosted GitLab; a pipeline page address also gives
+the pipeline number), an optional pipeline number (by default the latest failed pipeline) and a GitLab
+access token, which is required:
 
 - the `read_api` scope is enough to analyse;
-- creating the merge request or fixing until the pipeline passes needs the `api` scope (asked for at that moment
-  if the token has only `read_api`).
+- creating the merge request or fixing until the pipeline passes needs the `api` scope.
 
 On a free GitLab.com account, project access tokens are not available: use a personal access token
 (Preferences, Access tokens). The token is used for that run only and never stored.
 
-The page shows the progress of each agent, then the cause, the fix, the review and the diff. Two actions
-follow: download the patch, or create the draft merge request.
+| Method | Route | Purpose |
+|---|---|---|
+| GET  | `/web/config` | Public settings of the interface (access code request address, daily limit) |
+| POST | `/web/runs` | Analyse a project; answers a run id and a run key |
+| GET  | `/web/runs/<run_id>` | Progress of each agent, result, rounds and patch (`X-Run-Key`) |
+| POST | `/web/runs/<run_id>/publish` | Publish the fix as a draft merge request (`X-Run-Key`, `X-Gitlab-Token`) |
+| POST | `/web/runs/<run_id>/fix-until-green` | Commit the fix and fix round after round until the pipeline passes |
 
-Several visitors can use the page at the same time. At most `MAX_PARALLEL_RUNS` runs (default 2) work at
+**Interface on another domain.** List its address in `CORS_ORIGINS`, for example
+`CORS_ORIGINS=https://pipefix.xulys.com,http://localhost:5173`. Only the visitor API, `/health` and
+`/api/openapi.yaml` are open to those origins; the server API below never is. Empty (default): same
+domain only, for example when a route sends `/web` and `/api` to the API and `/` to the interface.
+
+Several visitors can use PipeFix at the same time. At most `MAX_PARALLEL_RUNS` runs (default 2) work at
 once in the pod; the others wait as "queued" and start by themselves. Two runs on the same project never
 work at the same time. Each access code may start `DAILY_RUNS_PER_VISITOR` analyses a day (default 10);
-after that the page says so. The LLM calls of the whole pod are spaced by `LLM_MIN_INTERVAL_S` (0.5 s), so
-several runs do not hit the provider's rate limit together. No Redis or database is needed for one pod.
+after that the API answers 429 with a clear message. The LLM calls of the whole pod are spaced by
+`LLM_MIN_INTERVAL_S` (0.5 s), so several runs do not hit the provider's rate limit together. No Redis or
+database is needed for one pod.
 
-## API
+## Server API
 
 | Method | Route | Purpose |
 |---|---|---|
+| GET  | `/` | Name and version of the API |
 | GET  | `/health` | Service is up |
+| GET  | `/api/openapi.yaml` | Description of the whole API (OpenAPI 3.1) |
 | GET  | `/api/v1/tools` | Tools available to the agents |
 | POST | `/api/v1/runs` | Start an analysis |
 | GET  | `/api/v1/runs/<run_id>` | Status, then report |
@@ -67,7 +93,7 @@ several runs do not hit the provider's rate limit together. No Redis or database
 | POST | `/api/v1/webhooks/gitlab` | GitLab pipeline events: a failed pipeline starts an analysis |
 
 The `/api/v1` routes need `Authorization: Bearer <API_TOKEN>`; they answer 503 while `API_TOKEN`
-is empty (the web page uses access codes and keeps working). Generate one with `openssl rand -hex 32`.
+is empty (the visitor API uses access codes and keeps working). Generate one with `openssl rand -hex 32`.
 
 Example:
 
@@ -98,8 +124,8 @@ The run stops without a merge request on `max_rounds_reached`, `repeated_failure
 (the same error lines came back), `pipeline_timeout` or a SHA mismatch; the fixes
 already made stay on the branch.
 
-**Web page.** After an analysis, *Fix until the pipeline passes* commits the fix the
-visitor saw, then runs the rounds; the page shows each round: the error lines of the
+**Web interface.** After an analysis, *Fix until the pipeline passes* commits the fix the
+visitor saw, then runs the rounds; the interface shows each round: the error lines of the
 failed jobs, the cause, the fix, the commit and the next pipeline. *Create merge request*
 still publishes the shown fix alone, without waiting for CI. Both need a token with
 the `api` scope, kept only while the run lasts.
