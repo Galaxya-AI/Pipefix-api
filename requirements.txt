@@ -15,4 +15,8 @@ ruff==0.17.2
 mypy==2.4.0
 types-requests==2.33.0.20261006
 fakeredis[lua]==2.40.0
+# API contract tests (openapi.yaml)
+PyYAML==6.0.3
+types-PyYAML==6.0.12.20260906
+jsonschema==4.25.1
 sentry-sdk==2.73.0

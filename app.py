@@ -1,10 +1,16 @@
-"""REST API and web page (PipeFix) of the CI remediation system: the Flask application and all its routes.
+"""REST API of PipeFix, the CI remediation system: the Flask application and all its routes.
+
+The backend serves JSON only. The web interface is a separate application (pipefix-web) that calls
+the visitor API below; it can be deployed on its own domain (see CORS_ORIGINS). Every route is
+described in openapi.yaml, served at /api/openapi.yaml.
 
 Development: python app.py
 Production:  gunicorn app:app (see docker-compose.yml)
 
 Routes:
+- GET  /                                     name and version of the API
 - GET  /health                               liveness check
+- GET  /api/openapi.yaml                     description of the API (OpenAPI 3.1)
 - GET  /api/v1/tools                         available tools
 - POST /api/v1/runs                          start a run -> 202 {"run_id": ...}
 - GET  /api/v1/runs                          list the runs
@@ -12,7 +18,7 @@ Routes:
 - GET  /api/v1/runs/<run_id>/events          journal events of a run
 - GET  /api/v1/runs/<run_id>/patch           proposed patch (text/x-diff)
 - POST /api/v1/webhooks/gitlab               GitLab "Pipeline Hook" -> 202
-- GET  /                                     PipeFix web page
+- GET  /web/config                           settings the web interface needs (access code request address...)
 - POST /web/runs                             dry run on the visitor's project -> 202 {"run_id": ..., "run_key": ...}
 - GET  /web/runs/<run_id>                    status, agents and patch of a web run (X-Run-Key header)
 - POST /web/runs/<run_id>/publish            publish that fix as a draft merge request (X-Run-Key + X-Gitlab-Token)
@@ -26,9 +32,10 @@ import atexit
 import hmac
 import os
 import secrets
+from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, abort, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 
 from app_runs.daily_limit import daily_limit
@@ -52,10 +59,14 @@ from web_support import (
     web_owner,
     web_owners,
 )
+from web_support_cors import add_cors_headers
 from workflow_publication.publisher import MERGE_REQUEST_FILE, load_saved_fix, publish_saved_fix, saved_start_pipeline
 
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+# Set by the deployment (image tag); shown by GET / and /web/config
+APP_VERSION = os.getenv("APP_VERSION", "dev")
+OPENAPI_FILE = Path(__file__).with_name("openapi.yaml")
 
 # Written in a web run folder once its fix went into the loop: the id of the loop run
 LOOP_RUN_FILE = "loop_run.id"
@@ -89,12 +100,18 @@ def unexpected_error(error: Exception) -> tuple[Response, int]:
     return jsonify({"error": "Internal Server Error", "message": "Request failed."}), 500
 
 
+@app.after_request
+def cors(response: Response) -> Response:
+    """Let the web interface call the visitor API from its own domain (CORS_ORIGINS)."""
+    return add_cors_headers(request, response)
+
+
 @app.before_request
 def require_api_token() -> None:
     """Abort with 503 if API_TOKEN is empty, 401 if the Bearer token does not match.
 
     The API runs with the server's GitLab token and LLM key: without API_TOKEN it stays closed,
-    so a forgotten setting never opens it. The web page uses access codes, not API_TOKEN.
+    so a forgotten setting never opens it. The web interface uses access codes, not API_TOKEN.
     """
     # /health is public and the webhook checks its own secret.
     if not request.path.startswith("/api/v1/") or request.path.startswith("/api/v1/webhooks/"):
@@ -107,9 +124,20 @@ def require_api_token() -> None:
         abort(401, description="Missing or invalid Bearer token.")
 
 
+@app.get("/")
+def root() -> Response:
+    return jsonify({"name": "PipeFix API", "version": APP_VERSION, "openapi": "/api/openapi.yaml"})
+
+
 @app.get("/health")
 def health() -> Response:
     return jsonify({"status": "ok"})
+
+
+@app.get("/api/openapi.yaml")
+def openapi() -> Response:
+    """The contract between this API and its clients, the web interface first."""
+    return send_file(OPENAPI_FILE, mimetype="application/yaml", max_age=300)
 
 
 @app.get("/api/v1/tools")
@@ -233,9 +261,18 @@ def gitlab_webhook() -> tuple[Response, int]:
     return jsonify({"status": "started", "run_id": run_id}), 202
 
 
-@app.get("/")
-def index() -> str:
-    return render_template("index.html", access_request_email=access_request_email())
+@app.get("/web/config")
+def web_config() -> Response:
+    """What the web interface needs to know before the first analysis; no secret is ever given here."""
+    return jsonify(
+        {
+            "version": APP_VERSION,
+            # Empty: the interface shows no "Ask for an access code" link
+            "access_request_email": access_request_email(),
+            # 0: no limit
+            "daily_runs_per_visitor": daily_limit.limit,
+        }
+    )
 
 
 @app.post("/web/runs")

@@ -1,4 +1,4 @@
-"""Tests of the PipeFix web form: one project address, optional token, run key, publish token."""
+"""Tests of the visitor API used by the web interface: project address, token, run key, publish token."""
 
 from __future__ import annotations
 
@@ -227,9 +227,10 @@ def test_api_is_closed_without_api_token(services: ApiServices, client: FlaskCli
     services.api_token = ""
     assert client.get("/api/v1/tools").status_code == 503
     assert client.post("/api/v1/runs", json={"project": "group/app"}).status_code == 503
-    # The web page does not use API_TOKEN, and /health stays public
+    # The visitor API does not use API_TOKEN, and /health, / and /web/config stay public
     assert client.get("/health").status_code == 200
     assert client.get("/").status_code == 200
+    assert client.get("/web/config").status_code == 200
 
 
 def test_api_needs_the_right_bearer_token(client: FlaskClient) -> None:
@@ -270,15 +271,13 @@ def test_a_visitor_gets_a_clear_message_after_the_daily_limit(
     assert "Daily limit reached: 1 analyses per access code" in refused.get_json()["message"]
 
 
-def test_the_page_offers_to_ask_for_an_access_code_only_when_an_address_is_set(
+def test_the_config_gives_the_access_request_address_only_when_it_is_valid(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import web_support
 
-    assert "Ask for one by email" not in client.get("/").get_data(as_text=True)
+    assert client.get("/web/config").get_json()["access_request_email"] == ""
     monkeypatch.setattr(web_support, "ACCESS_REQUEST_EMAIL", "owner@example.com")
-    page = client.get("/").get_data(as_text=True)
-    assert 'href="mailto:owner@example.com?subject=PipeFix%20access%20code%20request&amp;body=' in page
-    assert page.count("Ask for one by email") == 2
+    assert client.get("/web/config").get_json()["access_request_email"] == "owner@example.com"
     assert web_support.access_request_email("not an address") == ""
     assert web_support.access_request_email('a@b.com" onclick="x') == ""
