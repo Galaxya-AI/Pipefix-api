@@ -1,4 +1,4 @@
-"""Offline tests: reasoning models that refuse tools on /chat/completions; the provider's refusal on the page."""
+"""Offline tests: reasoning models that refuse tools on /chat/completions; the provider's refusal given to visitors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 import llm.providers.openai.provider as provider_module
 from llm.errors import LLMError
 from llm.providers.openai.provider import OpenAIProvider, parse_reasoning_efforts
-from web_support import agent_failure_reason
+from visitor_api.views import agent_failure_reason
 
 REFUSAL = (
     'LLM API error 400: {\n "error": {\n "message": "Function tools with reasoning_effort are not supported '
@@ -64,7 +64,7 @@ def test_reasoning_effort_from_the_settings_is_sent(monkeypatch: pytest.MonkeyPa
     assert "reasoning_effort" not in payloads[1]
 
 
-def test_the_page_shows_why_the_provider_refused_the_request() -> None:
+def test_visitors_learn_why_the_provider_refused_the_request() -> None:
     reason = agent_failure_reason(f"LLM call failed for agent 'triage': {REFUSAL}")
     assert reason is not None
     assert reason.startswith("The LLM provider refused the request (HTTP 400): Function tools with reasoning_effort")

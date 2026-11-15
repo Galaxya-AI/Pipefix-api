@@ -44,7 +44,7 @@ def client(services: ApiServices, monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     app_module = importlib.import_module("app")
     codes = tmp_path / "access-codes"
     codes.write_text("recruiter:good-code\n", encoding="utf-8")
-    monkeypatch.setattr(sys.modules["web_support"], "ACCESS_CODES_FILE", str(codes))
+    monkeypatch.setattr(sys.modules["visitor_api.access"], "ACCESS_CODES_FILE", str(codes))
     return app_module.app.test_client()
 
 
@@ -240,7 +240,7 @@ def test_api_needs_the_right_bearer_token(client: FlaskClient) -> None:
 
 
 def test_a_web_run_can_be_followed_again_after_a_restart(tmp_path: Path) -> None:
-    from web_support import WebOwners
+    from visitor_api.access import WebOwners
 
     first = WebOwners()
     first.runs_dir = tmp_path
@@ -274,10 +274,10 @@ def test_a_visitor_gets_a_clear_message_after_the_daily_limit(
 def test_the_config_gives_the_access_request_address_only_when_it_is_valid(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import web_support
+    from visitor_api import access
 
     assert client.get("/web/config").get_json()["access_request_email"] == ""
-    monkeypatch.setattr(web_support, "ACCESS_REQUEST_EMAIL", "owner@example.com")
+    monkeypatch.setattr(access, "ACCESS_REQUEST_EMAIL", "owner@example.com")
     assert client.get("/web/config").get_json()["access_request_email"] == "owner@example.com"
-    assert web_support.access_request_email("not an address") == ""
-    assert web_support.access_request_email('a@b.com" onclick="x') == ""
+    assert access.access_request_email("not an address") == ""
+    assert access.access_request_email('a@b.com" onclick="x') == ""

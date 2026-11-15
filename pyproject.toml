@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ci-remediation"
-version = "0.2.0"
-description = "Multi-agent system that diagnoses failed CI pipelines and proposes fixes as merge requests."
+name = "pipefix-api"
+version = "1.0.0"
+description = "PipeFix API: multi-agent system that diagnoses failed GitLab pipelines and proposes fixes as merge requests."
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2,<3",
@@ -38,7 +38,7 @@ select = ["E", "W", "F", "I", "UP", "B", "N"]
 [tool.ruff.lint.isort]
 known-first-party = [
     "agent_base", "agent_errors", "agent_runner", "agents", "app_runs", "changeset", "connectors", "fakes",
-    "journal", "llm", "mcp_runtime", "policy", "redis_jobs", "startup", "text_tools", "tools", "workflow_analysis",
+    "journal", "llm", "mcp_runtime", "policy", "redis_jobs", "startup", "text_tools", "tools", "visitor_api", "workflow_analysis",
     "workflow_publication", "workflow_remediation",
 ]
 

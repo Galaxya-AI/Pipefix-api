@@ -144,10 +144,6 @@ class AgentRunner:
         tool = self.tools.get(tool_name)
         return tool is not None and not tool.read_only
 
-    def run_tool(self, agent: AgentConfig, call: ToolCall, depth: int) -> str:
-        """Run a tool or a sub-agent; errors are returned as text so the LLM can react."""
-        return self.run_tool_checked(agent, call, depth)[0]
-
     def run_tool_checked(self, agent: AgentConfig, call: ToolCall, depth: int) -> tuple[str, bool]:
         """Run a tool or a sub-agent; return its result text and False if it failed."""
         sub_agent = sub_agent_from_tool_name(call.name)

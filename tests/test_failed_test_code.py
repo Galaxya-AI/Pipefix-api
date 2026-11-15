@@ -1,4 +1,4 @@
-"""Offline tests: the code of the failed tests given to the agents; no ghost round on the web page."""
+"""Offline tests: the code of the failed tests given to the agents; no ghost round in the visitor API."""
 
 from __future__ import annotations
 

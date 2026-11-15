@@ -121,7 +121,7 @@ class RemediationWorkflow:
     ) -> dict[str, Any]:
         """Publish a fix approved in an earlier dry run, then keep fixing until the pipeline passes.
 
-        Used by the web page: the visitor saw and accepted the first fix; the next rounds
+        Used by the visitor API: the visitor saw and accepted the first fix; the next rounds
         are run on the same branch, and the draft merge request opens only on a green pipeline.
         """
         report = self.new_report(project)
@@ -234,7 +234,7 @@ class RemediationWorkflow:
         With WAIT_FOR_PIPELINE disabled we retain the original single-fix workflow.
         Every wait is pinned to the SHA returned by GitLab, not just the branch.
         pipeline: the pipeline of the target branch, whose branch the merge request goes to.
-        first_result: the fix of round 1 when it was already approved (web page), so the agents are not run again.
+        first_result: the fix of round 1 when it was already approved (visitor API), so the agents are not run again.
         start: the pipeline analysed first, when it is not `pipeline` (a fix branch being resumed).
         """
         current = start or pipeline
@@ -333,7 +333,7 @@ class RemediationWorkflow:
         return "max_rounds_reached"
 
     def log_round_result(self, round_number: int, result: RoundResult) -> None:
-        """Record what the agents found and changed in this round, for the web page."""
+        """Record what the agents found and changed in this round, for the visitor API."""
         # getattr: a round stopped early may have no diagnosis or fix
         diagnosis = getattr(result, "diagnosis", None)
         fix = getattr(result, "fix", None)
