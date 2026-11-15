@@ -71,6 +71,10 @@ On a free GitLab.com account, project access tokens are not available: use a per
 `/api/openapi.yaml` are open to those origins; the server API below never is. Empty (default): same
 domain only, for example when a route sends `/web` and `/api` to the API and `/` to the interface.
 
+**On OpenShift**, `openshift/setup.sh` gives the API the paths `/web` and `/api` of `PIPEFIX_HOST`; the setup
+of pipefix-web gives it `/` of the same host. The interface then calls the API on its own domain, without
+CORS. Deploy the interface first: until its route exists, `/` of the host has no page.
+
 Several visitors can use PipeFix at the same time. At most `MAX_PARALLEL_RUNS` runs (default 2) work at
 once in the pod; the others wait as "queued" and start by themselves. Two runs on the same project never
 work at the same time. Each access code may start `DAILY_RUNS_PER_VISITOR` analyses a day (default 10);

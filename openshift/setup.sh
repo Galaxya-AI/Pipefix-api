@@ -61,22 +61,38 @@ else
   echo "No $codes: every visitor will be refused until pipefix-access exists." >&2
 fi
 
+# Public address, shared with the web interface (pipefix-web): /web and /api go to this API,
+# "/" goes to the interface (route created by the setup of pipefix-web).
 if [ -n "${PIPEFIX_HOST:-}" ]; then
-  oc apply -f - <<YAML
+  # HTTPS on the router (the visitors send their GitLab token); "none" only when TLS ends before OpenShift
+  tls_block=""
+  if [ "${PIPEFIX_TLS:-edge}" = "edge" ]; then
+    tls_block="  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect"
+  fi
+  for path in /web /api; do
+    name="pipefix-public-${path#/}"
+    oc apply -f - <<YAML
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: pipefix-xulys
+  name: $name
   labels:
     app: pipefix
 spec:
   host: $PIPEFIX_HOST
+  path: $path
   to:
     kind: Service
     name: pipefix
   port:
     targetPort: http
+$tls_block
 YAML
+  done
+  # Before the interface was its own application, the whole host went to the API
+  oc delete route pipefix-xulys --ignore-not-found
 fi
 
 echo
