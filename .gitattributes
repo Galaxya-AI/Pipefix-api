@@ -1,0 +1,7 @@
+# Left out of "git archive": deployment files are not needed to run or test the API.
+# They stay in the repository for the CI and OpenShift.
+.gitlab-ci.yml export-ignore
+.dockerignore export-ignore
+Dockerfile export-ignore
+docker-compose.yml export-ignore
+openshift/ export-ignore
