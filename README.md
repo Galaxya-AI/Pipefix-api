@@ -6,7 +6,7 @@ in a fixed order: **triage**, **diagnosis** (with web research when the error is
 published as a **draft** merge request: a human always decides before merging.
 
 This repository is the backend: agents, GitLab access, runs and a JSON API. The web interface
-is a separate application, [pipefix-web](https://gitlab.com/malabidi/pipefix-web). The contract
+is a separate application, pipefix-web, in its own repository. The contract
 between them is [`openapi.yaml`](openapi.yaml), also served at `GET /api/openapi.yaml`. The API
 works without the interface (curl, scripts, GitLab webhooks).
 
@@ -89,7 +89,7 @@ On a free GitLab.com account, project access tokens are not available: use a per
 | POST | `/web/runs/<run_id>/fix-until-green` | Commit the fix and fix round after round until the pipeline passes |
 
 **Interface on another domain.** List its address in `CORS_ORIGINS`, for example
-`CORS_ORIGINS=https://pipefix.xulys.com,http://localhost:5173`. Only the visitor API, `/health` and
+`CORS_ORIGINS=https://pipefix.example.com,http://localhost:5173`. Only the visitor API, `/health` and
 `/api/openapi.yaml` are open to those origins; the server API below never is. Empty (default): same
 domain only, for example when a route sends `/web` and `/api` to the API and `/` to the interface.
 
