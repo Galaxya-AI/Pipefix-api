@@ -21,7 +21,7 @@ OPEN_PATHS = ("/web/", "/health", "/api/openapi.yaml")
 
 def allowed_origins(value: str | None = None) -> frozenset[str]:
     """Origins allowed to call the visitor API, from a comma-separated list such as
-    "https://pipefix.xulys.com,http://localhost:5173". Empty: no cross-origin call (same domain only).
+    "https://pipefix.example.com,http://localhost:5173". Empty: no cross-origin call (same domain only).
 
     A trailing slash is removed, because a browser never sends one in the Origin header.
     """

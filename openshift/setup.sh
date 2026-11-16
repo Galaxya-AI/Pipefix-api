@@ -91,8 +91,6 @@ spec:
 $tls_block
 YAML
   done
-  # Before the interface was its own application, the whole host went to the API
-  oc delete route pipefix-xulys --ignore-not-found
 fi
 
 echo
